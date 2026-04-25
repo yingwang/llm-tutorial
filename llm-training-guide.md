@@ -11,11 +11,13 @@
 - [第二章：模型架构](#第二章模型架构)
 - [第三章：预训练 (Pretraining)](#第三章预训练-pretraining)
 - [第四章：Post-Training（后训练）](#第四章post-training后训练)
-- [第五章：训练基础设施 (Infra)](#第五章训练基础设施-infra)
-- [第六章：多模态 (Multimodal)](#第六章多模态-multimodal)
-- [第七章：评估与对齐 (Evaluation & Alignment)](#第七章评估与对齐-evaluation--alignment)
-- [第八章：SOTA 模型深度解析](#第八章sota-模型深度解析)
-- [第九章：实战路线图](#第九章实战路线图)
+- [第五章：参数高效微调 (PEFT)](#第五章参数高效微调-peft)
+- [第六章：训练基础设施 (Infra)](#第六章训练基础设施-infra)
+- [第七章：多模态 (Multimodal)](#第七章多模态-multimodal)
+- [第八章：评估与对齐 (Evaluation & Alignment)](#第八章评估与对齐-evaluation--alignment)
+- [第九章：SOTA 模型深度解析](#第九章sota-模型深度解析)
+- [第十章：知识蒸馏与模型合并](#第十章知识蒸馏与模型合并)
+- [第十一章：实战路线图](#第十一章实战路线图)
 - [附录：关键论文清单](#附录关键论文清单)
 
 ---
@@ -63,7 +65,7 @@ Subword tokenization 是折中方案：高频词保留为整词，低频词拆�
 ...
 ```
 
-**GPT 系列的 BPE**: OpenAI 的 `tiktoken` 在字节级 BPE 上做了改进：
+**GPT 系列的 BPE**: OpenAI 的 [tiktoken](https://github.com/openai/tiktoken) 在字节级 BPE 上做了改进：
 - 基于 UTF-8 字节而非 Unicode 字符，天然支持任何语言
 - 用正则预分词（把文本先切成大块再跑 BPE），避免跨词合并
 - GPT-4 用的 `cl100k_base` 词表有 ~100K tokens
@@ -105,7 +107,7 @@ score(x, y) = freq(xy) / (freq(x) × freq(y))
 
 **优势**: Unigram 可以输出 N-best 分词结果（概率化），对正则化有好处。
 
-**使用者**: T5、LLaMA、Gemma 等都用 SentencePiece 的 Unigram 模型。
+**使用者**: T5、LLaMA、Gemma 等都用 [SentencePiece](https://github.com/google/sentencepiece) 的 Unigram 模型。
 
 ### 1.2.4 对比
 
@@ -127,7 +129,7 @@ score(x, y) = freq(xy) / (freq(x) × freq(y))
 - 正常走 Unigram/BPE，遇到 OOV 字符时回退到字节表示
 - LLaMA 3 用这种方式
 
-**纯字节模型** (ByT5):
+**纯字节模型** ([ByT5](https://arxiv.org/abs/2105.13626)):
 - 完全不用 tokenizer，直接输入 UTF-8 字节
 - 优势：零预处理，鲁棒性极强
 - 劣势：序列长度暴增 3-4 倍，计算量大
@@ -161,6 +163,8 @@ print(output.tokens)
 print(output.ids)
 ```
 
+> 库: [huggingface/tokenizers](https://github.com/huggingface/tokenizers) | 最小化实现: [karpathy/minbpe](https://github.com/karpathy/minbpe)
+
 **关键决策**:
 - **词表大小**: 32K-256K。越大 → 序列越短但 embedding 层越大。LLaMA 2 用 32K，LLaMA 3 用 128K，GPT-4 用 100K
 - **特殊 token**: `<bos>`, `<eos>`, `<pad>`, `<unk>`，chat 模型还需要 `<|im_start|>`, `<|im_end|>` 等
@@ -183,7 +187,7 @@ print(output.ids)
 
 ## 1.6 SOTA Tokenizer 技巧
 
-- **Token Healing** (guidance): 生成时修复 tokenizer 导致的 prompt 边界问题
+- **Token Healing** ([guidance](https://github.com/guidance-ai/guidance)): 生成时修复 tokenizer 导致的 prompt 边界问题
 - **Byte Fallback**: SentencePiece 的 `byte_fallback=True`，OOV 回退到字节
 - **Split digits**: 把数字拆成单独的 digit token（`2024` → `2` `0` `2` `4`），提升数学能力
 - **Whitespace handling**: 保留前导空格作为 token 一部分（GPT 风格）vs 单独 token
@@ -195,7 +199,7 @@ print(output.ids)
 
 ## 2.1 Transformer 基础
 
-Transformer (Vaswani et al., 2017) 是现代 LLM 的骨架。核心组件：
+Transformer ([Vaswani et al., 2017](https://arxiv.org/abs/1706.03762)) 是现代 LLM 的骨架。核心组件：
 
 ### 2.1.1 Self-Attention
 
@@ -231,7 +235,7 @@ FFN(x) = W_2 · activation(W_1 · x + b_1) + b_2
 
 - 原始 Transformer 用 ReLU
 - GPT-2 用 GELU
-- LLaMA/现代模型用 SwiGLU:
+- LLaMA/现代模型用 SwiGLU ([Shazeer, 2020](https://arxiv.org/abs/2002.05202)):
 ```
 SwiGLU(x) = (x @ W_1 · σ(x @ W_gate)) @ W_2
 ```
@@ -244,7 +248,7 @@ SwiGLU 用了 gating mechanism，实际效果更好（但参数多 50%）。
   - 训练不稳定，需要 warmup
 - **Pre-Norm** (GPT-2+, 现代 LLM 标配): `x + SubLayer(LayerNorm(x))`
   - 训练更稳定，但最终性能可能略差
-- **RMSNorm** (LLaMA, Gemma): Pre-Norm 用 RMSNorm 替代 LayerNorm
+- **RMSNorm** ([Zhang & Sennrich, 2019](https://arxiv.org/abs/1910.07467)) (LLaMA, Gemma): Pre-Norm 用 RMSNorm 替代 LayerNorm
   ```
   RMSNorm(x) = x / RMS(x) * γ
   RMS(x) = √(mean(x²))
@@ -260,7 +264,7 @@ SwiGLU 用了 gating mechanism，实际效果更好（但参数多 50%）。
 | **Decoder-only** | **GPT, LLaMA, Claude** | **Causal LM** | **生成、对话、通用** |
 
 **为什么 Decoder-only 赢了**:
-- Scaling law 表现最好（Hoffmann et al., 2022）
+- Scaling law 表现最好（[Hoffmann et al., 2022](https://arxiv.org/abs/2203.15556)）
 - 训练简单：一个 loss (next token prediction)
 - 天然支持 in-context learning
 - 统一了理解和生成
@@ -286,7 +290,7 @@ PE(pos, 2i+1) = cos(pos / 10000^(2i/d))
 
 ### 2.2.2 RoPE (Rotary Position Embedding)
 
-**现代 LLM 的标准选择** (LLaMA, Qwen, Mistral, Gemma 等全部使用)
+**现代 LLM 的标准选择** ([Su et al., 2021](https://arxiv.org/abs/2104.09864))。LLaMA, Qwen, Mistral, Gemma 等全部使用。
 
 **核心思想**: 不加位置编码到 embedding 上，而是在 attention 计算时旋转 Q 和 K。
 
@@ -314,7 +318,7 @@ k_rotated = R(n) @ k   # position n
 
 预训练通常只用 2K-8K context，但推理时想用 128K+。
 
-**NTK-aware Interpolation (Code LLaMA 风格)**:
+**NTK-aware Interpolation** ([Reddit/bloc97](https://www.reddit.com/r/LocalLLaMA/comments/14lz7j5/ntkaware_scaled_rope_allows_llama_models_to_have/), Code LLaMA 风格):
 ```python
 # 不直接做位置插值（会模糊近距离信息），
 # 而是修改 RoPE 的 base frequency
@@ -322,12 +326,12 @@ base_new = base_old * (scale_factor ** (d / (d - 2)))
 # d = dimension, scale_factor = target_length / trained_length
 ```
 
-**YaRN (Yet another RoPE extensioN)**:
+**YaRN** ([Peng et al., 2023](https://arxiv.org/abs/2309.00071)):
 - 把 RoPE 的频率维度分为三组：低频（不改）、中频（插值）、高频（NTK 缩放）
 - 加一个 temperature 修正 attention 分布
 - LLaMA 3.1 的 128K context 就用了 YaRN 变体
 
-**ALiBi (Attention with Linear Biases)**:
+**ALiBi** ([Press et al., 2022](https://arxiv.org/abs/2108.12409)):
 - 不用位置编码，直接在 attention score 上加线性偏置：`score -= m * |i - j|`
 - m 是 head-specific 的斜率
 - 训练短、推理长，外推效果好
@@ -336,6 +340,8 @@ base_new = base_old * (scale_factor ** (d / (d - 2)))
 ## 2.3 现代架构改进
 
 ### 2.3.1 GQA (Grouped-Query Attention)
+
+([Ainslie et al., 2023](https://arxiv.org/abs/2305.13245))
 
 **问题**: MHA 中每个 head 有独立的 K、V，KV cache 随 head 数线性增长，是长上下文推理的瓶颈。
 
@@ -369,7 +375,7 @@ def grouped_query_attention(Q, K, V, num_q_heads, num_kv_heads):
 
 ### 2.3.2 MoE (Mixture of Experts)
 
-**核心思想**: FFN 层变成多个 "expert" FFN，每个 token 只激活其中 top-k 个。
+**核心思想**: FFN 层变成多个 "expert" FFN，每个 token 只激活其中 top-k 个。([Shazeer et al., 2017](https://arxiv.org/abs/1701.06538))
 
 ```
 # 标准 FFN:
@@ -382,7 +388,7 @@ top_k_experts = topk(gate_scores, k=2)
 output = Σ(gate_scores[i] * Expert_i(x))  for i in top_k_experts
 ```
 
-**优势**: 总参数量大但每个 token 的计算量小。Mixtral 8x7B 有 47B 参数但推理只激活 ~13B。
+**优势**: 总参数量大但每个 token 的计算量小。[Mixtral 8x7B](https://arxiv.org/abs/2401.04088) 有 47B 参数但推理只激活 ~13B。
 
 **挑战**:
 - **Load balancing**: 需要 auxiliary loss 防止所有 token 涌入同一个 expert
@@ -394,16 +400,16 @@ output = Σ(gate_scores[i] * Expert_i(x))  for i in top_k_experts
 - **通信开销**: expert 分布在不同 GPU 上，token 路由需要 all-to-all 通信
 - **训练不稳定**: 容易出现 expert collapse（某些 expert 学废了，永远不被选）
 
-**SOTA MoE 模型**: Mixtral 8x7B/8x22B, DBRX, Grok-1, DeepSeek-V2/V3, Qwen2-MoE
+**SOTA MoE 模型**: [Mixtral 8x7B/8x22B](https://arxiv.org/abs/2401.04088), [DBRX](https://www.databricks.com/blog/introducing-dbrx-new-state-art-open-llm), Grok-1, [DeepSeek-V2/V3](https://arxiv.org/abs/2412.19437), Qwen2-MoE
 
-**DeepSeek-V2/V3 的 MoE 改进**:
+**DeepSeek-V2/V3 的 MoE 改进** ([DeepSeek-V2](https://arxiv.org/abs/2405.04434)):
 - **DeepSeekMoE**: 更多更小的 expert (如 160 个 expert, top-6 激活)，替代传统的 8 expert top-2
 - **Shared expert**: 保留 1-2 个 expert 始终激活（处理通用知识），其余 expert 竞争路由
 - **Auxiliary-loss-free load balancing**: 用 bias term 而非 loss 来平衡负载
 
 ### 2.3.3 MLA (Multi-head Latent Attention)
 
-**DeepSeek-V2 引入**, DeepSeek-V3/R1 沿用。
+[DeepSeek-V2](https://arxiv.org/abs/2405.04434) 引入, DeepSeek-V3/R1 沿用。
 
 **问题**: GQA 虽然减少了 KV cache，但仍有信息损失。
 
@@ -422,7 +428,7 @@ KV cache 压缩到原来的 ~1/16，同时质量不输 MHA。
 
 ### 2.3.4 Sliding Window Attention
 
-**Mistral 引入**: 不同层交替使用全局 attention 和滑动窗口 attention。
+[Mistral 7B](https://arxiv.org/abs/2310.06825) 引入: 不同层交替使用全局 attention 和滑动窗口 attention。
 
 ```
 # 滑动窗口: 每个 token 只能看前后 W 个 token
@@ -436,7 +442,7 @@ KV cache 压缩到原来的 ~1/16，同时质量不输 MHA。
 
 ### 2.3.5 其他现代技巧
 
-**Parallel Attention + FFN** (GPT-J, PaLM 风格):
+**Parallel Attention + FFN** (GPT-J, [PaLM](https://arxiv.org/abs/2204.02311) 风格):
 ```python
 # 标准: 串行
 x = x + Attention(LayerNorm(x))
@@ -446,15 +452,15 @@ x = x + FFN(LayerNorm(x))
 x = x + Attention(LayerNorm(x)) + FFN(LayerNorm(x))
 ```
 
-**QK-Norm**: 对 Q 和 K 做 LayerNorm/RMSNorm，防止注意力 logits 爆炸。Gemma 2, Cohere 等使用。
+**QK-Norm**: 对 Q 和 K 做 LayerNorm/RMSNorm，防止注意力 logits 爆炸。[Gemma 2](https://arxiv.org/abs/2408.00118), Cohere 等使用。
 
-**Logit Soft-Capping** (Gemma 2): `logits = soft_cap * tanh(logits / soft_cap)`，限制 attention logits 和 final logits 的范围。
+**Logit Soft-Capping** ([Gemma 2](https://arxiv.org/abs/2408.00118)): `logits = soft_cap * tanh(logits / soft_cap)`，限制 attention logits 和 final logits 的范围。
 
 ## 2.4 模型规模设计
 
 ### Scaling Laws (Chinchilla)
 
-Hoffmann et al. (2022) 发现：
+[Hoffmann et al. (2022)](https://arxiv.org/abs/2203.15556) 发现：
 
 ```
 给定计算预算 C (FLOPs):
@@ -468,7 +474,7 @@ Hoffmann et al. (2022) 发现：
 
 | 参数量 | 最优 tokens | 代表模型 |
 |--------|------------|---------|
-| 1B | 20B | TinyLlama |
+| 1B | 20B | [TinyLlama](https://github.com/jzhang38/TinyLlama) |
 | 7B | 140B | LLaMA 2 7B (2T 实际用了更多) |
 | 13B | 260B | LLaMA 2 13B |
 | 70B | 1.4T | LLaMA 2 70B |
@@ -479,11 +485,11 @@ Hoffmann et al. (2022) 发现：
 
 | 模型 | 参数量 | Layers | Hidden | Heads | KV Heads | Vocab | Context |
 |------|--------|--------|--------|-------|----------|-------|---------|
-| LLaMA 2 7B | 6.7B | 32 | 4096 | 32 | 32 (MHA) | 32K | 4K |
-| LLaMA 3 8B | 8.0B | 32 | 4096 | 32 | 8 (GQA) | 128K | 128K |
-| Mistral 7B | 7.3B | 32 | 4096 | 32 | 8 (GQA) | 32K | 32K |
-| Qwen2 72B | 72.7B | 80 | 8192 | 64 | 8 (GQA) | 152K | 128K |
-| DeepSeek-V3 | 671B | 61 | 7168 | 128 | MLA | 128K | 128K |
+| [LLaMA 2 7B](https://arxiv.org/abs/2307.09288) | 6.7B | 32 | 4096 | 32 | 32 (MHA) | 32K | 4K |
+| [LLaMA 3 8B](https://arxiv.org/abs/2407.21783) | 8.0B | 32 | 4096 | 32 | 8 (GQA) | 128K | 128K |
+| [Mistral 7B](https://arxiv.org/abs/2310.06825) | 7.3B | 32 | 4096 | 32 | 8 (GQA) | 32K | 32K |
+| [Qwen2 72B](https://arxiv.org/abs/2407.10671) | 72.7B | 80 | 8192 | 64 | 8 (GQA) | 152K | 128K |
+| [DeepSeek-V3](https://arxiv.org/abs/2412.19437) | 671B | 61 | 7168 | 128 | MLA | 128K | 128K |
 
 ---
 
@@ -507,7 +513,7 @@ Loss = -Σ log P(x_t | x_1, ..., x_{t-1})
 
 ### 3.1.2 Fill-in-the-Middle (FIM)
 
-在 CLM 基础上加入中间填充能力（对代码补全尤其重要）:
+在 CLM 基础上加入中间填充能力（对代码补全尤其重要）([Bavarian et al., 2022](https://arxiv.org/abs/2207.14255)):
 
 ```
 原始: A B C D E
@@ -517,12 +523,12 @@ Loss = -Σ log P(x_t | x_1, ..., x_{t-1})
 # PSM (prefix-suffix-middle) 格式
 ```
 
-- GPT-4, StarCoder, CodeLlama 等代码模型都用 FIM
+- GPT-4, [StarCoder](https://arxiv.org/abs/2305.06161), [CodeLlama](https://arxiv.org/abs/2308.12950) 等代码模型都用 FIM
 - 通常只对一部分数据做 FIM 变换（如 50%），其余保持 CLM
 
 ### 3.1.3 Masked Language Modeling (MLM)
 
-BERT 风格，随机 mask 15% 的 token，预测被 mask 的 token：
+[BERT](https://arxiv.org/abs/1810.04805) 风格，随机 mask 15% 的 token，预测被 mask 的 token：
 ```
 输入: The [MASK] sat on the [MASK]
 目标: cat, mat
@@ -537,13 +543,13 @@ BERT 风格，随机 mask 15% 的 token，预测被 mask 的 token：
 
 | 来源 | 规模 | 质量 | 代表数据集 |
 |------|------|------|-----------|
-| Web crawl | PB级 | 低 | Common Crawl, C4, OSCAR |
-| 百科/知识 | TB级 | 高 | Wikipedia, Wikidata |
-| 书籍 | TB级 | 高 | Books3, Project Gutenberg |
-| 代码 | TB级 | 中 | GitHub, The Stack v2 |
-| 科学论文 | TB级 | 高 | arXiv, PubMed, S2ORC |
+| Web crawl | PB级 | 低 | [Common Crawl](https://commoncrawl.org/), [C4](https://huggingface.co/datasets/allenai/c4), [OSCAR](https://oscar-project.github.io/documentation/) |
+| 百科/知识 | TB级 | 高 | [Wikipedia](https://dumps.wikimedia.org/), Wikidata |
+| 书籍 | TB级 | 高 | Books3, [Project Gutenberg](https://www.gutenberg.org/) |
+| 代码 | TB级 | 中 | GitHub, [The Stack v2](https://huggingface.co/datasets/bigcode/the-stack-v2) |
+| 科学论文 | TB级 | 高 | [arXiv](https://arxiv.org/), [PubMed](https://pubmed.ncbi.nlm.nih.gov/), [S2ORC](https://github.com/allenai/s2orc) |
 | 对话/论坛 | TB级 | 中 | Reddit, StackOverflow |
-| 数学 | GB级 | 高 | OpenWebMath, ProofPile |
+| 数学 | GB级 | 高 | [OpenWebMath](https://huggingface.co/datasets/open-web-math/open-web-math), [ProofPile](https://huggingface.co/datasets/EleutherAI/proof-pile-2) |
 
 ### 3.2.2 数据处理 Pipeline
 
@@ -583,6 +589,8 @@ Raw Web Crawl
 ⑦ Tokenize → 二进制格式 (存为 memory-mapped 文件)
 ```
 
+> 工具: [HuggingFace datatrove](https://github.com/huggingface/datatrove) — 完整的数据处理框架 | [dolma](https://github.com/allenai/dolma) — Allen AI 的数据 toolkit
+
 ### 3.2.3 数据配比 (Data Mix)
 
 **关键决策**：不同来源的数据按什么比例混合。
@@ -600,7 +608,7 @@ Web (多语言): ~15%
 
 **配比调优方法**:
 1. **小模型代理实验**: 用 1B 模型跑多组不同配比，选下游任务最好的
-2. **DoReMi** (Google): 用 DRO (Distributionally Robust Optimization) 自动学习最优配比
+2. **DoReMi** ([Xie et al., 2023](https://arxiv.org/abs/2305.10429)): 用 DRO (Distributionally Robust Optimization) 自动学习最优配比
 3. **经验法则**: 代码比例↑提升推理能力，数学比例↑提升数学能力，对话比例↑提升指令遵循
 
 ### 3.2.4 Data Curriculum
@@ -623,16 +631,16 @@ Web (多语言): ~15%
 | Instruction data | 强模型 (GPT-4) 生成 QA pairs | SFT |
 | Code data | 模型生成代码 + 执行验证 | Code pretraining |
 | Math data | 模型生成证明步骤 + 验证 | Math reasoning |
-| Textbook-quality | "Textbooks Are All You Need" (Phi) | 预训练 |
+| Textbook-quality | ["Textbooks Are All You Need"](https://arxiv.org/abs/2306.11644) (Phi) | 预训练 |
 | Rephrased data | 用强模型重写 web 文本为教科书风格 | 预训练质量提升 |
 
-**Phi 系列 (Microsoft)**: 证明高质量 synthetic data + 小模型可以达到大模型级别的性能。Phi-3 3.8B ≈ LLaMA 3 8B。
+**[Phi 系列](https://arxiv.org/abs/2404.14219) (Microsoft)**: 证明高质量 synthetic data + 小模型可以达到大模型级别的性能。Phi-3 3.8B ≈ LLaMA 3 8B。
 
 ## 3.3 训练过程
 
 ### 3.3.1 优化器
 
-**AdamW** (几乎所有 LLM 的标准选择):
+**AdamW** ([Loshchilov & Hutter, 2019](https://arxiv.org/abs/1711.05101)) (几乎所有 LLM 的标准选择):
 ```
 m_t = β_1 * m_{t-1} + (1 - β_1) * g_t          # 一阶矩 (momentum)
 v_t = β_2 * v_{t-1} + (1 - β_2) * g_t²         # 二阶矩 (adaptive LR)
@@ -650,10 +658,10 @@ v̂_t = v_t / (1 - β_2^t)
 **Adam 的内存开销**: 每个参数需要存 m (fp32) + v (fp32) + params (fp16/bf16)。一个 70B 模型光优化器状态就要 ~560GB。
 
 **替代优化器**:
-- **Adafactor**: 用矩阵分解近似 v，内存减半。T5 用
-- **LION**: Google 提出，只用 sign(momentum)，内存更小。但需要更仔细的调参
-- **Sophia**: 用二阶信息（Hessian diagonal 估计）做 adaptive LR。收敛更快但计算更贵
-- **MUON**: 最新的优化器，用 momentum 的 SVD 来做更新方向。某些设置下大幅加速收敛
+- **[Adafactor](https://arxiv.org/abs/1804.04235)**: 用矩阵分解近似 v，内存减半。T5 用
+- **[LION](https://arxiv.org/abs/2302.06675)**: Google 提出，只用 sign(momentum)，内存更小。但需要更仔细的调参
+- **[Sophia](https://arxiv.org/abs/2305.14342)**: 用二阶信息（Hessian diagonal 估计）做 adaptive LR。收敛更快但计算更贵
+- **[MUON](https://arxiv.org/abs/2502.16982)**: 最新的优化器，用 momentum 的 SVD 来做更新方向。某些设置下大幅加速收敛
 
 ### 3.3.2 学习率调度
 
@@ -670,7 +678,7 @@ else:
     lr = min_lr + 0.5 * (peak_lr - min_lr) * (1 + cos(π * progress))
 ```
 
-**WSD (Warmup-Stable-Decay)**:
+**WSD (Warmup-Stable-Decay)** ([MiniCPM](https://arxiv.org/abs/2404.06395)):
 ```
 Warmup → 恒定学习率（大部分训练时间）→ 快速 decay
 ```
@@ -692,7 +700,7 @@ Warmup → 恒定学习率（大部分训练时间）→ 快速 decay
 | BF16 溢出 | embedding 层 spike | embedding 层用 FP32 |
 | z-loss | logits 绝对值过大 | 加 z-loss 正则化: α * log²(Σexp(logits)) |
 
-**PaLM 的经验**: Google 训练 PaLM 540B 时遇到 ~20 次 loss spike，处理方式是回滚到 spike 前的 checkpoint，跳过导致 spike 的数据。
+**PaLM 的经验**: Google 训练 [PaLM 540B](https://arxiv.org/abs/2204.02311) 时遇到 ~20 次 loss spike，处理方式是回滚到 spike 前的 checkpoint，跳过导致 spike 的数据。
 
 ### 3.3.4 Batch Size 策略
 
@@ -706,7 +714,7 @@ Warmup → 恒定学习率（大部分训练时间）→ 快速 decay
 
 **Batch size warmup**: 训练初期用小 batch（更好的泛化），后期增大（更稳定、更快）。
 
-**Critical batch size**: 低于此值，增大 batch 几乎线性加速；高于此值，收益递减。经验公式:
+**Critical batch size** ([McCandlish et al., 2018](https://arxiv.org/abs/1812.06162)): 低于此值，增大 batch 几乎线性加速；高于此值，收益递减。经验公式:
 ```
 B_crit ≈ B_noise / L   # B_noise 是梯度噪声规模，L 是当前 loss
 ```
@@ -721,7 +729,7 @@ B_crit ≈ B_noise / L   # B_noise 是梯度噪声规模，L 是当前 loss
 | FP16 | 16位 | ±65504 | 旧一代训练精度 (需要 loss scaling) |
 | FP8 | 8位 | E4M3/E5M2 | H100+ 前沿训练 |
 
-**Mixed Precision Training**:
+**Mixed Precision Training** ([Micikevicius et al., 2018](https://arxiv.org/abs/1710.03740)):
 ```python
 # PyTorch AMP
 with torch.autocast(device_type='cuda', dtype=torch.bfloat16):
@@ -756,7 +764,7 @@ scaler.update()
 
 ### 3.4.2 Ring Attention / Context Parallelism
 
-超长序列不能放到一张卡上时，把序列切成 chunks 分布到多张卡，用 ring 通信传递 KV。
+([Liu et al., 2023](https://arxiv.org/abs/2310.01889)) 超长序列不能放到一张卡上时，把序列切成 chunks 分布到多张卡，用 ring 通信传递 KV。
 
 ```
 GPU 0: tokens 0-32K      → 计算 attention chunk
@@ -814,17 +822,17 @@ The capital of France is Paris.<|im_end|>
 | 来源 | 规模 | 质量 | 例子 |
 |------|------|------|------|
 | 人工标注 | 10K-100K | 极高 | OpenAI 的内部数据, Anthropic 的标注数据 |
-| 开源数据集 | 100K-1M | 中-高 | OpenAssistant, Dolly, ShareGPT |
-| Synthetic | 1M+ | 中 | Self-Instruct, Evol-Instruct, Magpie |
+| 开源数据集 | 100K-1M | 中-高 | [OpenAssistant](https://huggingface.co/datasets/OpenAssistant/oasst1), [Dolly](https://huggingface.co/datasets/databricks/databricks-dolly-15k), [ShareGPT](https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered) |
+| Synthetic | 1M+ | 中 | [Self-Instruct](https://arxiv.org/abs/2212.10560), [Evol-Instruct](https://arxiv.org/abs/2304.12244), [Magpie](https://arxiv.org/abs/2406.08464) |
 | Distillation | 1M+ | 中-高 | 用 GPT-4/Claude 生成回答 |
 
-**LIMA 发现**: "Less Is More for Alignment" — 仅 1000 条高质量 SFT 数据就能让模型有不错的对话能力。质量 > 数量。
+**LIMA 发现** ([Zhou et al., 2023](https://arxiv.org/abs/2305.11206)): "Less Is More for Alignment" — 仅 1000 条高质量 SFT 数据就能让模型有不错的对话能力。质量 > 数量。
 
 ### 4.2.3 SFT 技巧
 
 **Instruction Diversity**: 比回答质量更重要。覆盖：代码、数学、创意写作、摘要、翻译、角色扮演、工具使用...
 
-**Rejection Sampling**: 对每个 prompt 生成 N 个回答，用 reward model 或规则选最好的。这是 meta 训练 LLaMA 3 的关键技巧。
+**Rejection Sampling**: 对每个 prompt 生成 N 个回答，用 reward model 或规则选最好的。这是 Meta 训练 LLaMA 3 的关键技巧。
 
 **超参**:
 - 学习率: 1e-5 ~ 2e-5（比预训练低 10-100 倍）
@@ -841,6 +849,8 @@ The capital of France is Paris.<|im_end|>
 ## 4.3 RLHF (Reinforcement Learning from Human Feedback)
 
 ### 4.3.1 完整 Pipeline
+
+([Ouyang et al., 2022 — InstructGPT](https://arxiv.org/abs/2203.02155))
 
 ```
 Step 1: Reward Model Training
@@ -879,10 +889,12 @@ def bt_loss(reward_chosen, reward_rejected):
 
 **RM 的问题**:
 - **Reward hacking**: 模型学会讨好 RM 而不是真正变好（如总是说长回答、用连接词）
-- **Over-optimization**: 优化 RM score 过头后性能反而下降
+- **Over-optimization**: 优化 RM score 过头后性能反而下降 ([Gao et al., 2023](https://arxiv.org/abs/2210.10760))
 - **Distribution shift**: RM 在 SFT 模型的输出上训练，对 PPO 后的输出可能不准
 
 ### 4.3.3 PPO (Proximal Policy Optimization)
+
+([Schulman et al., 2017](https://arxiv.org/abs/1707.06347))
 
 ```python
 # PPO objective:
@@ -906,13 +918,13 @@ reward_total = reward_rm - β * KL(π_θ || π_ref)
 
 ### 4.3.4 实际优化
 
-**REINFORCE Leave-One-Out (RLOO)**:
+**REINFORCE Leave-One-Out (RLOO)** ([Ahmadian et al., 2024](https://arxiv.org/abs/2402.14740)):
 - 替代 PPO 的更简单方法
 - 对每个 prompt 生成 K 个回答，用 leave-one-out baseline 估计 advantage
 - 不需要 value model，内存减半
 - DeepSeek、LLaMA 3 实际用的是 RLOO 变体
 
-**GRPO (Group Relative Policy Optimization)**:
+**GRPO (Group Relative Policy Optimization)** ([Shao et al., 2024 — DeepSeekMath](https://arxiv.org/abs/2402.03300)):
 - DeepSeek-R1 使用
 - 对每个 prompt 采样一组回答
 - 用组内相对排序作为 reward signal
@@ -921,6 +933,8 @@ reward_total = reward_rm - β * KL(π_θ || π_ref)
 ## 4.4 DPO (Direct Preference Optimization)
 
 ### 4.4.1 核心思想
+
+([Rafailov et al., 2023](https://arxiv.org/abs/2305.18290))
 
 **问题**: RLHF 太复杂——需要训练 RM，需要 PPO，需要 4 个模型。
 
@@ -943,17 +957,16 @@ L_DPO = -E[log σ(β * (log π_θ(y_w|x)/π_ref(y_w|x)
 
 | 变体 | 改进 | 论文 |
 |------|------|------|
-| **IPO** | 防止 overfitting 到偏好数据 | Azar et al. 2023 |
-| **KTO** | 只需要好/坏标签，不需要 pair | Ethayarajh et al. 2024 |
-| **ORPO** | 不需要 reference model | Hong et al. 2024 |
-| **SimPO** | 用序列平均 log-prob 作为 reward | Meng et al. 2024 |
-| **SPO** | 自我博弈偏好优化 | Wu et al. 2024 |
+| **IPO** | 防止 overfitting 到偏好数据 | [Azar et al., 2023](https://arxiv.org/abs/2310.12036) |
+| **KTO** | 只需要好/坏标签，不需要 pair | [Ethayarajh et al., 2024](https://arxiv.org/abs/2402.01306) |
+| **ORPO** | 不需要 reference model | [Hong et al., 2024](https://arxiv.org/abs/2403.07691) |
+| **SimPO** | 用序列平均 log-prob 作为 reward | [Meng et al., 2024](https://arxiv.org/abs/2405.14734) |
 
 ### 4.4.3 Online DPO vs Offline DPO
 
 **Offline DPO**: 用 SFT 模型生成的偏好数据训练 → 简单但效果有上限
 
-**Online/Iterative DPO**: 
+**Online/Iterative DPO** ([Xu et al., 2024](https://arxiv.org/abs/2404.07503)): 
 ```
 循环:
     1. 用当前策略 π_θ 生成回答
@@ -965,7 +978,7 @@ L_DPO = -E[log σ(β * (log π_θ(y_w|x)/π_ref(y_w|x)
 
 ## 4.5 Constitutional AI (CAI)
 
-Anthropic 提出的方法，用一组"宪法规则"进行自我对齐:
+([Bai et al., 2022](https://arxiv.org/abs/2212.08073)) Anthropic 提出的方法，用一组"宪法规则"进行自我对齐:
 
 ```
 Step 1: Red-teaming
@@ -980,14 +993,9 @@ Step 3: RL from AI Feedback (RLAIF)
     用 RM + PPO 训练
 ```
 
-**CAI 2.0 (Anthropic, 2024/2025)**:
-- 引入 "soul" spec 而非硬规则
-- 更多依赖自然语言的 high-level 价值观
-- 结合规则 + LLM 判断的 hybrid approach
-
 ## 4.6 RLVR (Reinforcement Learning with Verifiable Rewards)
 
-**DeepSeek-R1 的关键创新**: 用可验证的 reward (如数学答案正确性、代码执行结果) 做 RL，不需要人类偏好数据。
+**[DeepSeek-R1](https://arxiv.org/abs/2501.12948) 的关键创新**: 用可验证的 reward (如数学答案正确性、代码执行结果) 做 RL，不需要人类偏好数据。
 
 ```
 对于数学题:
@@ -1007,7 +1015,7 @@ Step 3: RL from AI Feedback (RLAIF)
 
 ### 4.7.1 Chain-of-Thought Training
 
-**OpenAI o1/o3** 和 **DeepSeek-R1** 代表了一种新范式:
+**OpenAI o1/o3** 和 **[DeepSeek-R1](https://arxiv.org/abs/2501.12948)** 代表了一种新范式:
 
 ```
 传统: prompt → answer
@@ -1015,13 +1023,13 @@ Step 3: RL from AI Feedback (RLAIF)
 ```
 
 训练方法:
-1. **Process Reward Model (PRM)**: 对每一步推理打分，而非只看最终答案 (Outcome Reward Model, ORM)
+1. **Process Reward Model (PRM)** ([Lightman et al., 2023](https://arxiv.org/abs/2305.20050)): 对每一步推理打分，而非只看最终答案 (Outcome Reward Model, ORM)
 2. **Monte Carlo Tree Search (MCTS)**: 在推理树上搜索最优路径
 3. **RLVR**: 用可验证 reward 训练长链推理
 
 ### 4.7.2 Test-Time Compute Scaling
 
-核心洞察：与其用更大的模型，不如让模型在推理时"思考"更长时间。
+核心洞察：与其用更大的模型，不如让模型在推理时"思考"更长时间。([Snell et al., 2024](https://arxiv.org/abs/2408.03314))
 
 ```
 传统 scaling: 增大模型 → 更好的结果
@@ -1064,18 +1072,153 @@ Model: 7^23 = 27368747340080916343
 Observation → Thought → Action → Observation → Thought → Action → ... → Answer
 ```
 
-**SWE-Agent/SWE-bench** 风格训练:
+**[SWE-Agent](https://github.com/princeton-nlp/SWE-agent)/[SWE-bench](https://www.swebench.com/)** 风格训练:
 - 给模型一个 GitHub issue
 - 模型读代码、编辑文件、跑测试
 - reward = 测试通过
 
 ---
 
-# 第五章：训练基础设施 (Infra)
+# 第五章：参数高效微调 (PEFT)
 
-## 5.1 硬件
+全量微调一个 70B 模型需要 ~1TB 显存（参数 + 优化器状态 + 梯度 + 激活）。PEFT 方法只训练一小部分参数，大幅降低资源需求。
 
-### 5.1.1 GPU 选型
+## 5.1 LoRA (Low-Rank Adaptation)
+
+([Hu et al., 2021](https://arxiv.org/abs/2106.09685)) — **目前最主流的 PEFT 方法。**
+
+### 5.1.1 核心思想
+
+预训练权重冻结，旁路加入低秩分解的可训练矩阵：
+
+```
+# 原始: Y = X @ W       (W ∈ ℝ^{d×d})
+# LoRA: Y = X @ W + X @ A @ B
+#       A ∈ ℝ^{d×r}, B ∈ ℝ^{r×d}, r << d
+
+# 参数量对比 (d=4096, r=16):
+# 全量: 4096 × 4096 = 16.7M
+# LoRA: 4096 × 16 + 16 × 4096 = 131K (减少 128 倍!)
+```
+
+### 5.1.2 关键超参
+
+| 超参 | 常用值 | 说明 |
+|------|--------|------|
+| `r` (rank) | 8-64 | 越大越接近全量微调，但参数越多 |
+| `alpha` | 16-64 | 缩放因子。实际 scaling = alpha/r |
+| `target_modules` | q_proj, v_proj, k_proj, o_proj, gate_proj, up_proj, down_proj | 对哪些层加 LoRA |
+| `dropout` | 0.05-0.1 | LoRA 层的 dropout |
+
+**经验法则**:
+- `r=16, alpha=32` 是很好的起点
+- 对 attention 层 (q, k, v, o) + FFN 层 (gate, up, down) 都加 LoRA 效果最好
+- rank 太小会欠拟合，太大浪费资源且可能过拟合
+
+### 5.1.3 代码实现
+
+```python
+from peft import LoraConfig, get_peft_model, TaskType
+
+config = LoraConfig(
+    task_type=TaskType.CAUSAL_LM,
+    r=16,
+    lora_alpha=32,
+    lora_dropout=0.05,
+    target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
+                     "gate_proj", "up_proj", "down_proj"],
+)
+
+model = get_peft_model(base_model, config)
+model.print_trainable_parameters()
+# trainable params: 41,943,040 || all params: 8,072,204,288 || trainable%: 0.52%
+```
+
+> 库: [huggingface/peft](https://github.com/huggingface/peft)
+
+### 5.1.4 LoRA 合并
+
+训练完后可以把 LoRA 权重合并回原模型，推理时零额外开销：
+
+```python
+merged_model = model.merge_and_unload()
+# W_new = W + A @ B
+# 推理时和全量微调的模型完全相同
+```
+
+## 5.2 QLoRA
+
+([Dettmers et al., 2023](https://arxiv.org/abs/2305.14314)) — **让单卡 24GB GPU 也能微调 70B 模型。**
+
+### 5.2.1 核心创新
+
+在 LoRA 基础上加入三个内存优化：
+
+1. **4-bit NormalFloat (NF4) 量化**: 把 frozen 参数量化到 4-bit
+2. **Double Quantization**: 量化 scaling factor 本身（再省内存）
+3. **Paged Optimizers**: 用 CPU 内存作为 GPU 内存的交换空间
+
+```
+内存对比 (LLaMA 65B):
+全量微调: ~780GB (需要多节点)
+LoRA FP16: ~130GB (2× A100 80GB)
+QLoRA 4-bit: ~48GB (1× A100 80GB!)
+```
+
+### 5.2.2 使用
+
+```python
+from transformers import BitsAndBytesConfig
+
+bnb_config = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_quant_type="nf4",
+    bnb_4bit_compute_dtype=torch.bfloat16,
+    bnb_4bit_use_double_quant=True,
+)
+
+model = AutoModelForCausalLM.from_pretrained(
+    "meta-llama/Llama-3-8B",
+    quantization_config=bnb_config,
+)
+
+# 然后像普通 LoRA 一样加 adapter
+model = get_peft_model(model, lora_config)
+```
+
+## 5.3 其他 PEFT 方法
+
+| 方法 | 原理 | 参数量 | 论文 |
+|------|------|--------|------|
+| **Prefix Tuning** | 在每层 attention 前加可训练 prefix tokens | 0.1% | [Li & Liang, 2021](https://arxiv.org/abs/2101.00190) |
+| **Prompt Tuning** | 在输入前加可训练 soft prompts | 0.01% | [Lester et al., 2021](https://arxiv.org/abs/2104.08691) |
+| **Adapter** | 在每层 Transformer 后插入小型 MLP | 1-5% | [Houlsby et al., 2019](https://arxiv.org/abs/1902.00751) |
+| **IA3** | 学习对 K, V, FFN 的缩放向量 | 0.01% | [Liu et al., 2022](https://arxiv.org/abs/2205.05638) |
+| **DoRA** | LoRA + 权重幅度分解 | ~LoRA | [Liu et al., 2024](https://arxiv.org/abs/2402.09353) |
+
+**实际选择**: 绝大多数场景用 LoRA 或 QLoRA 即可。其他方法在特定场景有优势但生态支持不如 LoRA。
+
+## 5.4 PEFT 实战建议
+
+**什么时候用 PEFT vs 全量微调**:
+- 数据量 < 100K：PEFT（全量微调容易过拟合）
+- 数据量 > 1M + 大预算：全量微调
+- 预算有限（单卡/几卡）：QLoRA
+- 需要切换多个任务：LoRA（可以同时加载多个 adapter）
+
+**常见工具**:
+- [huggingface/trl](https://github.com/huggingface/trl) — SFT, DPO, PPO + LoRA
+- [axolotl](https://github.com/axolotl-ai-cloud/axolotl) — 一站式微调（支持 LoRA/QLoRA + 各种格式）
+- [unsloth](https://github.com/unslothai/unsloth) — 2x 加速 LoRA 微调（手写 kernel）
+- [LLaMA-Factory](https://github.com/hiyouga/LLaMA-Factory) — 中文社区常用的微调框架
+
+---
+
+# 第六章：训练基础设施 (Infra)
+
+## 6.1 硬件
+
+### 6.1.1 GPU 选型
 
 | GPU | 显存 | BF16 TFLOPS | FP8 TFLOPS | 互连 | 用途 |
 |-----|------|-------------|------------|------|------|
@@ -1091,7 +1234,7 @@ Observation → Thought → Action → Observation → Thought → Action → ..
 - **算力 (TFLOPS)**: 决定训练速度（训练是 compute-bound）
 - **互连带宽**: 决定多卡并行效率
 
-### 5.1.2 集群网络
+### 6.1.2 集群网络
 
 ```
 单机内:
@@ -1113,11 +1256,11 @@ GPU (8) → Node → Leaf switch (32 nodes) → Spine switch → Fat-tree/Dragon
 ```
 
 **网络问题**: 训练大模型时，一个慢节点或丢包就会拖慢整个训练。需要：
-- NCCL 调优
+- [NCCL](https://github.com/NVIDIA/nccl) 调优
 - 网络拓扑感知的进程放置
 - 容错机制（自动检测并替换故障节点）
 
-### 5.1.3 存储
+### 6.1.3 存储
 
 ```
 训练数据读取:
@@ -1131,9 +1274,9 @@ Checkpoint 写入:
   → Nebula/分布式 checkpoint 存储
 ```
 
-## 5.2 分布式训练策略
+## 6.2 分布式训练策略
 
-### 5.2.1 数据并行 (Data Parallelism, DP)
+### 6.2.1 数据并行 (Data Parallelism, DP)
 
 **最简单的并行方式**: 每张卡存完整模型副本，不同卡处理不同数据。
 
@@ -1148,9 +1291,9 @@ GPU 0-3: 用平均梯度更新模型
 
 **限制**: 每张卡要放整个模型。7B 模型 (BF16) = 14GB 参数 + 优化器状态 ~56GB → 一张 80GB 卡勉强放下。70B 模型放不下。
 
-### 5.2.2 ZeRO (Zero Redundancy Optimizer)
+### 6.2.2 ZeRO (Zero Redundancy Optimizer)
 
-**DeepSpeed 的核心贡献**: 数据并行中的冗余太多——每张卡都存完整模型 + 优化器状态。ZeRO 把它们切分。
+([Rajbhandari et al., 2020](https://arxiv.org/abs/1910.02054)) **[DeepSpeed](https://github.com/microsoft/DeepSpeed) 的核心贡献**: 数据并行中的冗余太多——每张卡都存完整模型 + 优化器状态。ZeRO 把它们切分。
 
 ```
 ZeRO Stage 1: 切分优化器状态
@@ -1185,7 +1328,9 @@ model = FSDP(
 - 更好地配合 tensor parallel
 - 支持 FP8
 
-### 5.2.3 张量并行 (Tensor Parallelism, TP)
+### 6.2.3 张量并行 (Tensor Parallelism, TP)
+
+([Shoeybi et al., 2019 — Megatron-LM](https://arxiv.org/abs/1909.08053))
 
 **把单个层的矩阵乘法切分到多张卡上**:
 
@@ -1206,7 +1351,9 @@ GPU 1: Y_1 = X @ W_1   (W_1 = W[:, d/2:])
 
 **适用场景**: 机内（NVLink 带宽足够），通常 TP=8（一台机器内）
 
-### 5.2.4 流水线并行 (Pipeline Parallelism, PP)
+### 6.2.4 流水线并行 (Pipeline Parallelism, PP)
+
+([Narayanan et al., 2021](https://arxiv.org/abs/2104.04473))
 
 **把模型按层切分到不同机器**:
 
@@ -1222,16 +1369,16 @@ GPU 3: Layers 24-31  (Stage 3)
 **问题**: 朴素 PP 有大量"bubble"（GPU 空闲等待）。
 
 **解决方案**:
-- **GPipe**: 把 micro-batch 切成更小的 mini-batch，增加流水线并行度
+- **GPipe** ([Huang et al., 2019](https://arxiv.org/abs/1811.06965)): 把 micro-batch 切成更小的 mini-batch，增加流水线并行度
 - **1F1B** (one-forward-one-backward): 前向和反向交替调度，减少 bubble
   ```
   Stage 0: F0 F1 F2 F3 B0 B1 B2 B3   (朴素, 大bubble)
   Stage 0: F0 F1 F2 F3 B0 F4 B1 F5   (1F1B, 小bubble)
   ```
 - **Interleaved PP**: 每张卡放非连续的层（如 GPU 0 放 layer 0,8,16,24），减少 bubble
-- **Zero-bubble PP**: 通过重新调度把 bubble 降到接近 0
+- **Zero-bubble PP** ([Qi et al., 2024](https://arxiv.org/abs/2401.10241)): 通过重新调度把 bubble 降到接近 0
 
-### 5.2.5 Context Parallelism (CP)
+### 6.2.5 Context Parallelism (CP)
 
 **长序列并行**: 把序列切分到多张卡，每张卡处理一部分序列。
 
@@ -1248,7 +1395,7 @@ Attention 通过 Ring Attention 计算:
 - 重复直到所有 KV 都遍历过
 ```
 
-### 5.2.6 Expert Parallelism (EP)
+### 6.2.6 Expert Parallelism (EP)
 
 **MoE 模型专用**: 不同 expert 放在不同 GPU 上。
 
@@ -1266,7 +1413,7 @@ Token routing:
 
 **通信瓶颈**: All-to-All 通信量和 token 数 × hidden_size 成正比。
 
-### 5.2.7 3D/4D/5D 并行组合
+### 6.2.7 3D/4D/5D 并行组合
 
 实际大模型训练组合多种并行:
 
@@ -1288,20 +1435,20 @@ LLaMA 3 405B (16384 H100 GPUs):
   16384 = 8 × 16 × 128
 ```
 
-## 5.3 训练框架
+## 6.3 训练框架
 
-### 5.3.1 框架对比
+### 6.3.1 框架对比
 
 | 框架 | 公司 | 并行策略 | 适用规模 |
 |------|------|---------|---------|
-| Megatron-LM | NVIDIA | TP+PP+DP, MoE | 百B-万B |
-| DeepSpeed | Microsoft | ZeRO, PP, MoE | 十B-千B |
-| FSDP (PyTorch) | Meta | ZeRO-3 | 十B-百B |
-| ColossalAI | HPC-AI Tech | 多种 | 十B-百B |
-| Alpa | Google | Auto-parallelism | 研究 |
-| Levanter | Stanford | JAX-based | 研究 |
+| [Megatron-LM](https://github.com/NVIDIA/Megatron-LM) | NVIDIA | TP+PP+DP, MoE | 百B-万B |
+| [DeepSpeed](https://github.com/microsoft/DeepSpeed) | Microsoft | ZeRO, PP, MoE | 十B-千B |
+| [FSDP](https://pytorch.org/docs/stable/fsdp.html) (PyTorch) | Meta | ZeRO-3 | 十B-百B |
+| [ColossalAI](https://github.com/hpcaitech/ColossalAI) | HPC-AI Tech | 多种 | 十B-百B |
+| [Levanter](https://github.com/stanford-crfm/levanter) | Stanford | JAX-based | 研究 |
+| [NanoGPT](https://github.com/karpathy/nanoGPT) | Karpathy | DDP | 学习/小规模 |
 
-### 5.3.2 Megatron-LM 核心
+### 6.3.2 Megatron-LM 核心
 
 ```python
 # Megatron-LM 的 3D 并行配置
@@ -1319,9 +1466,9 @@ args = {
 }
 ```
 
-### 5.3.3 高效训练技巧
+### 6.3.3 高效训练技巧
 
-**Gradient Checkpointing (Activation Recomputation)**:
+**Gradient Checkpointing (Activation Recomputation)** ([Chen et al., 2016](https://arxiv.org/abs/1604.06174)):
 ```
 正常: 前向保存所有中间激活 → 反向使用
 问题: 激活占内存太多 (正比于 batch_size × seq_len × hidden × layers)
@@ -1333,7 +1480,7 @@ Gradient Checkpointing: 只保存部分层的激活，反向时重算
 选择性 checkpointing: 只 checkpoint 占内存大的操作 (attention)
 ```
 
-**Flash Attention**:
+**Flash Attention** ([Dao et al., 2022](https://arxiv.org/abs/2205.14135)):
 ```
 标准 Attention:
   S = Q @ K^T          → O(n²d) compute, O(n²) memory
@@ -1349,6 +1496,8 @@ Flash Attention (Tri Dao):
   Flash Attention 2: 更好的并行化
   Flash Attention 3: H100 优化, FP8 支持
 ```
+
+> 代码: [Dao-AILab/flash-attention](https://github.com/Dao-AILab/flash-attention)
 
 **Compiled/Fused Kernels**:
 ```python
@@ -1374,9 +1523,9 @@ Overlap:
   异步启动通信，计算的同时传输梯度
 ```
 
-## 5.4 容错与效率
+## 6.4 容错与效率
 
-### 5.4.1 Checkpoint 策略
+### 6.4.1 Checkpoint 策略
 
 ```python
 # 异步 checkpoint (不阻塞训练)
@@ -1391,7 +1540,7 @@ from torch.distributed.checkpoint import save, load
 save(model.state_dict(), storage_writer=FileSystemWriter(path))
 ```
 
-### 5.4.2 故障恢复
+### 6.4.2 故障恢复
 
 大集群训练中故障是常态:
 - 16K GPU 训练，平均每 2-3 小时一次硬件故障
@@ -1403,7 +1552,7 @@ save(model.state_dict(), storage_writer=FileSystemWriter(path))
 - 坏节点自动被替换节点顶替
 - 训练仅丢失 10 分钟内的进度
 
-### 5.4.3 MFU (Model FLOPS Utilization)
+### 6.4.3 MFU (Model FLOPS Utilization)
 
 **衡量训练效率的核心指标**:
 ```
@@ -1423,9 +1572,9 @@ MFU = 实际计算量 / (理论峰值算力 × 训练时间)
 - Kernel 效率
 - Gradient checkpointing 的重计算开销
 
-## 5.5 推理优化 (Inference)
+## 6.5 推理优化 (Inference)
 
-### 5.5.1 KV Cache
+### 6.5.1 KV Cache
 
 ```
 自回归生成时，每个新 token 需要和所有前文做 attention
@@ -1442,35 +1591,37 @@ KV cache ≈ 2 * 80 * 8 * 128 * 128K * 2 ≈ 42GB per request!
 **KV Cache 优化**:
 - **GQA**: KV heads 减少 → cache 减少 (见 2.3.1)
 - **MLA**: 压缩到 latent → cache 大幅减少 (见 2.3.3)
-- **PagedAttention** (vLLM): 用虚拟内存分页管理 KV cache，消除碎片
+- **PagedAttention** ([vLLM](https://github.com/vllm-project/vllm)): 用虚拟内存分页管理 KV cache，消除碎片
 - **KV Cache Quantization**: 把 KV cache 量化到 INT8/FP8
 
-### 5.5.2 量化推理
+### 6.5.2 量化推理
 
 | 方法 | 精度 | 速度提升 | 质量损失 |
 |------|------|---------|---------|
 | BF16 | 16-bit | 1x (baseline) | 无 |
 | INT8 (W8A8) | 8-bit | ~2x | 极小 |
 | FP8 | 8-bit | ~2x | 极小 |
-| INT4 (GPTQ/AWQ) | 4-bit | ~3-4x | 小 |
+| INT4 ([GPTQ](https://arxiv.org/abs/2210.17323)/[AWQ](https://arxiv.org/abs/2306.00978)) | 4-bit | ~3-4x | 小 |
 | GGUF Q4_K_M | 4-bit mixed | ~3-4x | 小 |
 | INT2-3 | 2-3 bit | ~5x+ | 明显 |
 
 **GPTQ**: Post-training quantization，用校准数据最小化量化误差
 **AWQ**: Activation-aware Weight Quantization，保护 salient weights
-**GGUF**: llama.cpp 格式，CPU/GPU 混合推理
+**GGUF**: [llama.cpp](https://github.com/ggerganov/llama.cpp) 格式，CPU/GPU 混合推理
 
-### 5.5.3 推理框架
+### 6.5.3 推理框架
 
 | 框架 | 特点 | 适用 |
 |------|------|------|
-| **vLLM** | PagedAttention, continuous batching | 生产部署首选 |
-| **TensorRT-LLM** | NVIDIA 优化, FP8 | 最大吞吐 |
-| **SGLang** | RadixAttention, prefix caching | 复杂 prompt |
-| **llama.cpp** | CPU/Apple Silicon, GGUF | 本地推理 |
-| **MLC-LLM** | 编译优化, 多平台 | 端侧 |
+| [**vLLM**](https://github.com/vllm-project/vllm) | PagedAttention, continuous batching | 生产部署首选 |
+| [**TensorRT-LLM**](https://github.com/NVIDIA/TensorRT-LLM) | NVIDIA 优化, FP8 | 最大吞吐 |
+| [**SGLang**](https://github.com/sgl-project/sglang) | RadixAttention, prefix caching | 复杂 prompt |
+| [**llama.cpp**](https://github.com/ggerganov/llama.cpp) | CPU/Apple Silicon, GGUF | 本地推理 |
+| [**MLC-LLM**](https://github.com/mlc-ai/mlc-llm) | 编译优化, 多平台 | 端侧 |
 
-### 5.5.4 Speculative Decoding
+### 6.5.4 Speculative Decoding
+
+([Leviathan et al., 2023](https://arxiv.org/abs/2211.17192))
 
 ```
 问题: LLM 自回归生成是 memory-bound，GPU 算力利用率很低
@@ -1484,18 +1635,18 @@ Target model: 并行验证 → 接受 t1, t2, t3, 拒绝 t4 → 从 t3 后重新
      速度提升 2-3x，输出质量和大模型完全相同
 ```
 
-**EAGLE** (高级 speculative decoding):
+**[EAGLE](https://arxiv.org/abs/2401.15077)** (高级 speculative decoding):
 - Draft model 用 target model 的中间层特征
 - 比独立 draft model 更准确
 - 速度提升 3x+
 
 ---
 
-# 第六章：多模态 (Multimodal)
+# 第七章：多模态 (Multimodal)
 
-## 6.1 Vision-Language Models (VLMs)
+## 7.1 Vision-Language Models (VLMs)
 
-### 6.1.1 架构模式
+### 7.1.1 架构模式
 
 ```
 方式一: Cross-Attention (Flamingo/Claude 3 风格)
@@ -1520,9 +1671,9 @@ Target model: 并行验证 → 接受 t1, t2, t3, 拒绝 t4 → 从 t3 后重新
   劣势: 训练成本极高
 ```
 
-### 6.1.2 Vision Encoder
+### 7.1.2 Vision Encoder
 
-**主流选择**: CLIP ViT (Vision Transformer)
+**主流选择**: [CLIP](https://arxiv.org/abs/2103.00020) ViT (Vision Transformer)
 
 ```
 Image (224×224) → Patch Embedding (14×14 patches = 256 tokens)
@@ -1552,7 +1703,7 @@ Image (224×224) → Patch Embedding (14×14 patches = 256 tokens)
   - Token Merging: 合并相似的 visual token
 ```
 
-### 6.1.3 训练流程
+### 7.1.3 训练流程
 
 ```
 Stage 1: Vision-Language Alignment (预训练)
@@ -1573,20 +1724,20 @@ Stage 3: Preference Optimization (可选)
   - 改善幻觉 (减少模型"编造"图中不存在的内容)
 ```
 
-### 6.1.4 SOTA VLMs
+### 7.1.4 SOTA VLMs
 
 | 模型 | 参数量 | Vision Encoder | 特点 |
 |------|--------|---------------|------|
 | GPT-4o | ? | 原生多模态 | 最强综合性能 |
 | Claude 3.5 Sonnet | ? | Cross-attention | 强文档理解 |
 | Gemini 1.5 Pro | ? | 原生多模态 | 超长上下文 (1M+) |
-| LLaVA-OneVision | 7B/72B | SigLIP | 开源 SOTA |
-| InternVL 2.5 | 78B | InternViT-6B | 开源 SOTA |
-| Qwen2-VL | 72B | ViT-600M | 强 OCR/文档 |
+| [LLaVA-OneVision](https://arxiv.org/abs/2408.03326) | 7B/72B | SigLIP | 开源 SOTA |
+| [InternVL 2.5](https://arxiv.org/abs/2412.05819) | 78B | InternViT-6B | 开源 SOTA |
+| [Qwen2-VL](https://arxiv.org/abs/2409.12191) | 72B | ViT-600M | 强 OCR/文档 |
 
-## 6.2 Image Generation
+## 7.2 Image Generation
 
-### 6.2.1 Diffusion Models
+### 7.2.1 Diffusion Models
 
 ```
 前向过程: x_0 → x_1 → ... → x_T (逐步加噪声)
@@ -1599,7 +1750,7 @@ Stage 3: Preference Optimization (可选)
   # c = 条件 (文本 embedding)
 ```
 
-**Latent Diffusion (Stable Diffusion)**:
+**Latent Diffusion** ([Rombach et al., 2022](https://arxiv.org/abs/2112.10752)):
 ```
 Image → VAE Encoder → Latent (64×64) → Diffusion → VAE Decoder → Image
                                           ↑
@@ -1608,19 +1759,19 @@ Image → VAE Encoder → Latent (64×64) → Diffusion → VAE Decoder → Imag
 
 在 latent space 做 diffusion，计算量小很多。
 
-### 6.2.2 Text-to-Image
+### 7.2.2 Text-to-Image
 
 | 模型 | 架构 | 特点 |
 |------|------|------|
-| Stable Diffusion 3 | DiT (Diffusion Transformer) | 开源, MMDiT |
+| [Stable Diffusion 3](https://arxiv.org/abs/2403.03206) | DiT (Diffusion Transformer) | 开源, MMDiT |
 | DALL-E 3 | Diffusion + Caption rewriting | 强 prompt 遵循 |
 | Midjourney v6 | ? | 最佳美学 |
-| FLUX | Rectified Flow Transformer | 新 SOTA 开源 |
+| [FLUX](https://github.com/black-forest-labs/flux) | Rectified Flow Transformer | 新 SOTA 开源 |
 | Imagen 3 | Cascaded Diffusion | Google |
 
-**DiT (Diffusion Transformer)**: 用 Transformer 替代 U-Net 作为 diffusion 的 backbone。FLUX, SD3 都基于 DiT。
+**DiT** ([Peebles & Xie, 2023](https://arxiv.org/abs/2212.09748)): 用 Transformer 替代 U-Net 作为 diffusion 的 backbone。FLUX, SD3 都基于 DiT。
 
-### 6.2.3 Autoregressive Image Generation
+### 7.2.3 Autoregressive Image Generation
 
 **新趋势**: 用和 LLM 一样的自回归方式生成图像。
 
@@ -1634,13 +1785,13 @@ Image → VAE Encoder → Latent (64×64) → Diffusion → VAE Decoder → Imag
   代表: MAR, Transfusion
 ```
 
-**Transfusion (Meta)**: 统一文本 (AR) 和图像 (diffusion) 在同一个模型中。
+**[Transfusion](https://arxiv.org/abs/2408.11039) (Meta)**: 统一文本 (AR) 和图像 (diffusion) 在同一个模型中。
 
-## 6.3 Audio & Speech
+## 7.3 Audio & Speech
 
-### 6.3.1 Speech-to-Text (ASR)
+### 7.3.1 Speech-to-Text (ASR)
 
-**Whisper (OpenAI)**:
+**[Whisper](https://arxiv.org/abs/2212.04356) (OpenAI)**:
 ```
 Audio → Mel Spectrogram → Audio Encoder (Transformer)
 → Cross-Attention with Text Decoder → Transcription
@@ -1649,16 +1800,18 @@ Audio → Mel Spectrogram → Audio Encoder (Transformer)
 特点: 98种语言, 极强鲁棒性
 ```
 
-### 6.3.2 Text-to-Speech (TTS)
+> 代码: [openai/whisper](https://github.com/openai/whisper)
+
+### 7.3.2 Text-to-Speech (TTS)
 
 | 模型 | 方法 | 特点 |
 |------|------|------|
-| VALL-E | AR codec tokens | 3秒 voice clone |
-| Bark | AR + Diffusion | 多语言, 开源 |
-| F5-TTS | Flow matching | 快速, 高质量 |
+| [VALL-E](https://arxiv.org/abs/2301.02111) | AR codec tokens | 3秒 voice clone |
+| [Bark](https://github.com/suno-ai/bark) | AR + Diffusion | 多语言, 开源 |
+| [F5-TTS](https://arxiv.org/abs/2410.06885) | Flow matching | 快速, 高质量 |
 | GPT-4o | 端到端多模态 | 最自然 |
 
-### 6.3.3 Audio Understanding
+### 7.3.3 Audio Understanding
 
 **Unified Audio-Language Models**:
 ```
@@ -1669,9 +1822,9 @@ Audio → Audio Encoder (Whisper encoder 或 HuBERT)
 代表: SALMONN, Qwen-Audio, Gemini
 ```
 
-## 6.4 Video
+## 7.4 Video
 
-### 6.4.1 Video Understanding
+### 7.4.1 Video Understanding
 
 ```
 Video = 多帧图像 + 时序信息
@@ -1689,7 +1842,7 @@ Video = 多帧图像 + 时序信息
 代表模型: Gemini 1.5 (100万token, 1小时视频), GPT-4o, LLaVA-Video
 ```
 
-### 6.4.2 Video Generation
+### 7.4.2 Video Generation
 
 ```
 Text/Image → Spatial-Temporal DiT → Video
@@ -1707,7 +1860,7 @@ SOTA:
   - Wan (阿里): 开源 SOTA
 ```
 
-## 6.5 Omni Models (全模态)
+## 7.5 Omni Models (全模态)
 
 **终极目标**: 一个模型处理所有模态（文本、图像、音频、视频）的输入和输出。
 
@@ -1724,68 +1877,65 @@ Gemini 2: 多模态输入输出 + 工具使用
 
 ---
 
-# 第七章：评估与对齐 (Evaluation & Alignment)
+# 第八章：评估与对齐 (Evaluation & Alignment)
 
-## 7.1 预训练评估
+## 8.1 预训练评估
 
-### 7.1.1 标准 Benchmark
+### 8.1.1 标准 Benchmark
 
 | Benchmark | 评测能力 | 数据量 | 指标 |
 |-----------|---------|--------|------|
-| MMLU | 知识 (57科目) | 15K | Accuracy |
-| HellaSwag | 常识推理 | 10K | Accuracy |
-| ARC-Challenge | 科学问答 | 1.2K | Accuracy |
-| WinoGrande | 指代消解 | 1.7K | Accuracy |
-| GSM8K | 小学数学 | 1.3K | Accuracy |
-| MATH | 竞赛数学 | 5K | Accuracy |
-| HumanEval | 代码 (Python) | 164 | pass@1 |
-| MBPP | 代码 (Python) | 974 | pass@1 |
+| [MMLU](https://arxiv.org/abs/2009.03300) | 知识 (57科目) | 15K | Accuracy |
+| [HellaSwag](https://arxiv.org/abs/1905.07830) | 常识推理 | 10K | Accuracy |
+| [ARC-Challenge](https://arxiv.org/abs/1803.05457) | 科学问答 | 1.2K | Accuracy |
+| [WinoGrande](https://arxiv.org/abs/1907.10641) | 指代消解 | 1.7K | Accuracy |
+| [GSM8K](https://arxiv.org/abs/2110.14168) | 小学数学 | 1.3K | Accuracy |
+| [MATH](https://arxiv.org/abs/2103.03874) | 竞赛数学 | 5K | Accuracy |
+| [HumanEval](https://arxiv.org/abs/2107.03374) | 代码 (Python) | 164 | pass@1 |
+| [MBPP](https://arxiv.org/abs/2108.07732) | 代码 (Python) | 974 | pass@1 |
 | TriviaQA | 事实问答 | 95K | F1/EM |
 
-### 7.1.2 进阶 Benchmark
+### 8.1.2 进阶 Benchmark
 
 | Benchmark | 评测能力 | 特点 |
 |-----------|---------|------|
-| **MMLU-Pro** | 更难的知识测试 | 10选项 + 推理题 |
-| **GPQA** | PhD级科学问答 | 领域专家出题 |
+| [**MMLU-Pro**](https://arxiv.org/abs/2406.01574) | 更难的知识测试 | 10选项 + 推理题 |
+| [**GPQA**](https://arxiv.org/abs/2311.12022) | PhD级科学问答 | 领域专家出题 |
 | **MATH-500** | 数学推理 | 更多样 |
-| **LiveCodeBench** | 代码 (持续更新) | 防数据泄露 |
-| **SWE-bench** | 软件工程 | 修真实 GitHub issue |
+| [**LiveCodeBench**](https://livecodebench.github.io/) | 代码 (持续更新) | 防数据泄露 |
+| [**SWE-bench**](https://www.swebench.com/) | 软件工程 | 修真实 GitHub issue |
 | **AIME 2024/2025** | 数学竞赛 | 最难的数学评测 |
-| **Codeforces** | 竞赛编程 | ELO rating |
-| **IFEval** | 指令遵循 | 格式、约束 |
-| **Arena-Hard** | 综合对话 | 模拟人类偏好 |
+| [**Codeforces**](https://codeforces.com/) | 竞赛编程 | ELO rating |
+| [**IFEval**](https://arxiv.org/abs/2311.07911) | 指令遵循 | 格式、约束 |
+| [**Arena-Hard**](https://github.com/lm-sys/arena-hard-auto) | 综合对话 | 模拟人类偏好 |
 
-### 7.1.3 多模态评估
+### 8.1.3 多模态评估
 
 | Benchmark | 模态 | 能力 |
 |-----------|------|------|
-| MMMU | 图像+文本 | 多学科视觉问答 |
-| MathVista | 图像+文本 | 数学视觉推理 |
-| DocVQA | 文档图像 | 文档理解 |
+| [MMMU](https://arxiv.org/abs/2311.16502) | 图像+文本 | 多学科视觉问答 |
+| [MathVista](https://arxiv.org/abs/2310.02255) | 图像+文本 | 数学视觉推理 |
+| [DocVQA](https://arxiv.org/abs/2007.00398) | 文档图像 | 文档理解 |
 | ChartQA | 图表 | 图表理解 |
 | OCRBench | 图像 | OCR 能力 |
-| VideoMME | 视频+文本 | 视频理解 |
+| [VideoMME](https://arxiv.org/abs/2405.21075) | 视频+文本 | 视频理解 |
 
-## 7.2 人类评估
+> 评估框架: [EleutherAI/lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness) — 统一跑各种 benchmark
 
-### 7.2.1 Chatbot Arena (LMSYS)
+## 8.2 人类评估
+
+### 8.2.1 Chatbot Arena (LMSYS)
 
 **最权威的 LLM 排名**: 真实用户盲测两个模型，选更好的。
+
+> [https://chat.lmsys.org/](https://chat.lmsys.org/) | [排行榜](https://huggingface.co/spaces/lmsys/chatbot-arena-leaderboard)
 
 ```
 用户提问 → 模型 A 和模型 B 分别回答（匿名）→ 用户选哪个更好
 → 用 Bradley-Terry 模型计算 ELO rating
-
-当前 top (2025/2026):
-1. Claude 4 Opus         ~1350
-2. GPT-4.5               ~1340
-3. Gemini 2 Ultra        ~1330
-4. DeepSeek-R1           ~1320
-...
 ```
 
-### 7.2.2 Red Teaming
+### 8.2.2 Red Teaming
 
 系统性地测试模型的安全边界:
 - Jailbreak 测试
@@ -1793,7 +1943,7 @@ Gemini 2: 多模态输入输出 + 工具使用
 - 隐私泄露
 - 偏见检测
 
-## 7.3 Alignment 技术总结
+## 8.3 Alignment 技术总结
 
 ```
 Level 0: 预训练数据过滤 (去有害内容)
@@ -1814,9 +1964,11 @@ Level 5: Scalable oversight (可扩展的监督)
 
 ---
 
-# 第八章：SOTA 模型深度解析
+# 第九章：SOTA 模型深度解析
 
-## 8.1 LLaMA 3 / 3.1 / 3.3 (Meta)
+## 9.1 LLaMA 3 / 3.1 / 3.3 (Meta)
+
+> 论文: [LLaMA 3](https://arxiv.org/abs/2407.21783) | 权重: [meta-llama](https://huggingface.co/meta-llama)
 
 ```
 参数: 8B, 70B, 405B
@@ -1834,7 +1986,9 @@ Level 5: Scalable oversight (可扩展的监督)
 - 代码执行反馈: 用代码执行结果作为 reward
 ```
 
-## 8.2 DeepSeek-V3 / R1
+## 9.2 DeepSeek-V3 / R1
+
+> 论文: [DeepSeek-V3](https://arxiv.org/abs/2412.19437) | [DeepSeek-R1](https://arxiv.org/abs/2501.12948) | 权重: [deepseek-ai](https://huggingface.co/deepseek-ai)
 
 ```
 DeepSeek-V3:
@@ -1859,7 +2013,9 @@ DeepSeek-R1:
   - 完全开源 (权重 + 论文)
 ```
 
-## 8.3 Claude 3/4 (Anthropic)
+## 9.3 Claude 3/4 (Anthropic)
+
+> 文档: [anthropic.com/claude](https://www.anthropic.com/claude)
 
 ```
 架构: 未公开 (推测 dense transformer, cross-attention multimodal)
@@ -1873,7 +2029,9 @@ DeepSeek-R1:
 - Claude 4: 超强 coding, agentic 能力
 ```
 
-## 8.4 Gemini 2 (Google)
+## 9.4 Gemini 2 (Google)
+
+> 论文: [Gemini](https://arxiv.org/abs/2312.11805) | [Gemini 1.5](https://arxiv.org/abs/2403.05530)
 
 ```
 架构: 原生多模态 Transformer (MoE)
@@ -1886,7 +2044,9 @@ DeepSeek-R1:
 - Gemini 2 Flash: 极快推理
 ```
 
-## 8.5 GPT-4 / o1 / o3 (OpenAI)
+## 9.5 GPT-4 / o1 / o3 (OpenAI)
+
+> 文档: [platform.openai.com](https://platform.openai.com/docs)
 
 ```
 GPT-4:
@@ -1901,7 +2061,9 @@ o1/o3 (reasoning):
   - o3 在 ARC-AGI 上达到 87.5%
 ```
 
-## 8.6 Qwen 2.5 / QwQ (Alibaba)
+## 9.6 Qwen 2.5 / QwQ (Alibaba)
+
+> 论文: [Qwen2](https://arxiv.org/abs/2407.10671) | 权重: [Qwen](https://huggingface.co/Qwen)
 
 ```
 参数: 0.5B, 1.5B, 3B, 7B, 14B, 32B, 72B + MoE
@@ -1917,7 +2079,9 @@ o1/o3 (reasoning):
 - Qwen-Agent: 工具使用框架
 ```
 
-## 8.7 Mistral / Mixtral
+## 9.7 Mistral / Mixtral
+
+> 论文: [Mistral 7B](https://arxiv.org/abs/2310.06825) | [Mixtral](https://arxiv.org/abs/2401.04088) | 权重: [mistralai](https://huggingface.co/mistralai)
 
 ```
 Mistral 7B:
@@ -1934,22 +2098,90 @@ Mistral Large 2:
   强代码和多语言
 ```
 
-## 8.8 小模型 (Small Language Models)
+## 9.8 小模型 (Small Language Models)
 
 | 模型 | 参数量 | 训练数据 | 特点 |
 |------|--------|---------|------|
-| Phi-3/3.5 | 3.8B/14B | Synthetic重 | "教科书级"数据质量 |
-| Gemma 2 | 2B/9B/27B | 大规模过训练 | Google 开源 |
-| SmolLM | 135M-1.7B | 高质量 web data | HuggingFace |
-| TinyLlama | 1.1B | 3T tokens | 极度过训练 |
+| [Phi-3/3.5](https://arxiv.org/abs/2404.14219) | 3.8B/14B | Synthetic重 | "教科书级"数据质量 |
+| [Gemma 2](https://arxiv.org/abs/2408.00118) | 2B/9B/27B | 大规模过训练 | Google 开源 |
+| [SmolLM](https://huggingface.co/HuggingFaceTB/SmolLM2-1.7B) | 135M-1.7B | 高质量 web data | HuggingFace |
+| [TinyLlama](https://github.com/jzhang38/TinyLlama) | 1.1B | 3T tokens | 极度过训练 |
 
 **趋势**: 小模型 + 高质量数据 + 过训练 → 性价比极高。端侧部署 (手机、PC) 是重要方向。
 
 ---
 
-# 第九章：实战路线图
+# 第十章：知识蒸馏与模型合并
 
-## 9.1 学习路径
+## 10.1 知识蒸馏 (Knowledge Distillation)
+
+([Hinton et al., 2015](https://arxiv.org/abs/1503.02531))
+
+**核心思想**: 用大模型 (teacher) 的 soft labels 训练小模型 (student)。
+
+```python
+# 标准 KD Loss
+L = α * CE(student_logits, hard_labels) + (1-α) * KL(
+    softmax(student_logits / T),
+    softmax(teacher_logits / T)
+) * T²
+
+# T = temperature (通常 2-20)，让 soft labels 更"软"
+# α = hard/soft label 的权重平衡
+```
+
+### LLM 蒸馏方法
+
+| 方法 | 说明 | 例子 |
+|------|------|------|
+| **Logit distillation** | 学 teacher 的 output distribution | 经典 KD |
+| **On-policy distillation** | student 生成 → teacher 打分 → 训练 student | GKD ([Agarwal et al., 2024](https://arxiv.org/abs/2306.13649)) |
+| **Synthetic data** | teacher 生成回答，student 当 SFT 数据 | Alpaca, Vicuna |
+| **Reasoning distillation** | teacher 生成 CoT → student 学 CoT | DeepSeek-R1 蒸馏版 |
+
+**DeepSeek-R1 蒸馏**: 用 R1 (671B) 的 reasoning traces 蒸馏出 1.5B-70B 的小模型，效果惊人地好。
+
+## 10.2 模型合并 (Model Merging)
+
+不额外训练，直接在权重空间合并多个模型。
+
+### 10.2.1 方法
+
+| 方法 | 原理 | 论文 |
+|------|------|------|
+| **Linear** | `W = α * W_A + (1-α) * W_B` | - |
+| **SLERP** | 球面线性插值 | - |
+| **TIES** | 修剪冲突参数后合并 | [Yadav et al., 2023](https://arxiv.org/abs/2306.01708) |
+| **DARE** | 随机 drop 并 rescale delta weights | [Yu et al., 2024](https://arxiv.org/abs/2311.03099) |
+| **Model Soups** | 平均多个 fine-tune checkpoint | [Wortsman et al., 2022](https://arxiv.org/abs/2203.05482) |
+
+### 10.2.2 工具
+
+> [arcee-ai/mergekit](https://github.com/arcee-ai/mergekit) — 最流行的模型合并工具
+
+```yaml
+# mergekit 配置示例 (YAML)
+models:
+  - model: base_model
+    parameters:
+      weight: 0.5
+  - model: math_model
+    parameters:
+      weight: 0.3
+  - model: code_model
+    parameters:
+      weight: 0.2
+merge_method: linear
+dtype: bfloat16
+```
+
+**实际用途**: 合并一个通用模型 + 一个数学模型 + 一个代码模型 → 得到一个三者兼备的模型，不需要额外训练。[Open LLM Leaderboard](https://huggingface.co/spaces/open-llm-leaderboard/open_llm_leaderboard) 上很多顶级模型是合并得到的。
+
+---
+
+# 第十一章：实战路线图
+
+## 11.1 学习路径
 
 ### Phase 1: 基础 (2-4 周)
 
@@ -2035,97 +2267,89 @@ Mistral Large 2:
   - 优化 MFU
 ```
 
-## 9.2 推荐资源
+## 11.2 推荐资源
 
-### 必读论文
+### 必读论文 (带链接)
 
-```
-基础:
-1. Attention Is All You Need (Vaswani 2017) - Transformer
-2. Language Models are Unsupervised Multitask Learners (GPT-2)
-3. Language Models are Few-Shot Learners (GPT-3)
+**基础**:
+1. [Attention Is All You Need](https://arxiv.org/abs/1706.03762) (Vaswani 2017) — Transformer
+2. [Language Models are Unsupervised Multitask Learners](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf) (GPT-2)
+3. [Language Models are Few-Shot Learners](https://arxiv.org/abs/2005.14165) (GPT-3)
 
-Scaling:
-4. Scaling Laws for Neural Language Models (Kaplan 2020)
-5. Training Compute-Optimal LLMs (Chinchilla, Hoffmann 2022)
+**Scaling**:
+4. [Scaling Laws for Neural Language Models](https://arxiv.org/abs/2001.08361) (Kaplan 2020)
+5. [Training Compute-Optimal LLMs](https://arxiv.org/abs/2203.15556) (Chinchilla, Hoffmann 2022)
 
-架构:
-6. LLaMA: Open and Efficient Foundation Language Models (Touvron 2023)
-7. Mistral 7B (Jiang 2023)
-8. DeepSeek-V2: A Strong, Economical, and Efficient MoE (2024)
+**架构**:
+6. [LLaMA: Open and Efficient Foundation Language Models](https://arxiv.org/abs/2302.13971) (Touvron 2023)
+7. [Mistral 7B](https://arxiv.org/abs/2310.06825) (Jiang 2023)
+8. [DeepSeek-V2: A Strong, Economical, and Efficient MoE](https://arxiv.org/abs/2405.04434) (2024)
 
-Post-Training:
-9. Training language models to follow instructions with human feedback (InstructGPT)
-10. Direct Preference Optimization (Rafailov 2023)
-11. DeepSeek-R1 (2025)
+**Post-Training**:
+9. [Training language models to follow instructions with human feedback](https://arxiv.org/abs/2203.02155) (InstructGPT)
+10. [Direct Preference Optimization](https://arxiv.org/abs/2305.18290) (Rafailov 2023)
+11. [DeepSeek-R1](https://arxiv.org/abs/2501.12948) (2025)
 
-Infra:
-12. Megatron-LM (Shoeybi 2019)
-13. ZeRO: Memory Optimizations (Rajbhandari 2020)
-14. FlashAttention (Dao 2022)
-15. FlashAttention-2 (Dao 2023)
+**Infra**:
+12. [Megatron-LM](https://arxiv.org/abs/1909.08053) (Shoeybi 2019)
+13. [ZeRO: Memory Optimizations](https://arxiv.org/abs/1910.02054) (Rajbhandari 2020)
+14. [FlashAttention](https://arxiv.org/abs/2205.14135) (Dao 2022)
+15. [FlashAttention-2](https://arxiv.org/abs/2307.08691) (Dao 2023)
 
-多模态:
-16. Learning Transferable Visual Models (CLIP, Radford 2021)
-17. Visual Instruction Tuning (LLaVA, Liu 2023)
-18. Gemini: A Family of Highly Capable Multimodal Models (Google 2023)
-```
+**多模态**:
+16. [Learning Transferable Visual Models (CLIP)](https://arxiv.org/abs/2103.00020) (Radford 2021)
+17. [Visual Instruction Tuning (LLaVA)](https://arxiv.org/abs/2304.08485) (Liu 2023)
+18. [Gemini: A Family of Highly Capable Multimodal Models](https://arxiv.org/abs/2312.11805) (Google 2023)
+
+**PEFT**:
+19. [LoRA: Low-Rank Adaptation of Large Language Models](https://arxiv.org/abs/2106.09685) (Hu 2021)
+20. [QLoRA: Efficient Finetuning of Quantized LLMs](https://arxiv.org/abs/2305.14314) (Dettmers 2023)
 
 ### 代码项目
 
-```
-入门:
-- nanoGPT (Karpathy): 从头训练 GPT-2
-  github.com/karpathy/nanoGPT
+**入门**:
+- [karpathy/nanoGPT](https://github.com/karpathy/nanoGPT) — 从头训练 GPT-2
+- [karpathy/llm.c](https://github.com/karpathy/llm.c) — C语言实现 GPT-2 训练
+- [karpathy/minbpe](https://github.com/karpathy/minbpe) — 最小化 BPE 实现
 
-- llm.c (Karpathy): C语言实现 GPT-2 训练
-  github.com/karpathy/llm.c
+**进阶**:
+- [Lightning-AI/litgpt](https://github.com/Lightning-AI/litgpt) — 生产级 LLM 训练
+- [pytorch/torchtune](https://github.com/pytorch/torchtune) — PyTorch 原生微调框架
+- [huggingface/trl](https://github.com/huggingface/trl) — SFT, DPO, PPO, RLOO
+- [axolotl-ai-cloud/axolotl](https://github.com/axolotl-ai-cloud/axolotl) — 一站式微调
+- [unslothai/unsloth](https://github.com/unslothai/unsloth) — 2x 加速 LoRA 微调
 
-- minbpe (Karpathy): 最小化 BPE 实现
-  github.com/karpathy/minbpe
+**Infra**:
+- [NVIDIA/Megatron-LM](https://github.com/NVIDIA/Megatron-LM) — 大规模预训练
+- [microsoft/DeepSpeed](https://github.com/microsoft/DeepSpeed) — 分布式训练
+- [vllm-project/vllm](https://github.com/vllm-project/vllm) — 高效推理
+- [sgl-project/sglang](https://github.com/sgl-project/sglang) — 推理 + serving
 
-进阶:
-- litGPT (Lightning AI): 生产级 LLM 训练
-  github.com/Lightning-AI/litgpt
+**多模态**:
+- [haotian-liu/LLaVA](https://github.com/haotian-liu/LLaVA) — 视觉语言模型
+- [huggingface/transformers](https://github.com/huggingface/transformers) — 统一框架
+- [openai/whisper](https://github.com/openai/whisper) — 语音识别
 
-- torchtune (Meta): PyTorch 原生微调框架
-  github.com/pytorch/torchtune
+**数据处理**:
+- [huggingface/datatrove](https://github.com/huggingface/datatrove) — 数据处理 pipeline
+- [allenai/dolma](https://github.com/allenai/dolma) — 数据 toolkit
+- [bigcode-project/bigcode-dataset](https://github.com/bigcode-project/bigcode-dataset) — 代码数据处理
 
-- TRL (HuggingFace): SFT, DPO, PPO, RLOO
-  github.com/huggingface/trl
-
-- Axolotl: 一站式微调
-  github.com/axolotl-ai-cloud/axolotl
-
-Infra:
-- Megatron-LM: 大规模预训练
-  github.com/NVIDIA/Megatron-LM
-
-- DeepSpeed: 分布式训练
-  github.com/microsoft/DeepSpeed
-
-- vLLM: 高效推理
-  github.com/vllm-project/vllm
-
-多模态:
-- LLaVA: 视觉语言模型
-  github.com/haotian-liu/LLaVA
-
-- transformers (HuggingFace): 统一框架
-  github.com/huggingface/transformers
-```
+**评估**:
+- [EleutherAI/lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness) — 统一评估框架
+- [princeton-nlp/SWE-bench](https://github.com/princeton-nlp/SWE-bench) — 软件工程评估
+- [openai/human-eval](https://github.com/openai/human-eval) — 代码评估
 
 ### 课程
 
-```
-- Andrej Karpathy: Neural Networks: Zero to Hero (YouTube)
-- Stanford CS224N: NLP with Deep Learning
-- Stanford CS336: Language Modeling from Scratch (2024)
-- CMU 11-868: Large Language Models (2024)
-- Maxime Labonne: LLM Course (GitHub, 免费)
-```
+- [Andrej Karpathy: Neural Networks: Zero to Hero](https://www.youtube.com/playlist?list=PLAqhIrjkxbuWI23v9cThsA9GvCAUhRvKZ) (YouTube, 免费)
+- [Stanford CS224N: NLP with Deep Learning](https://web.stanford.edu/class/cs224n/) (课件/视频免费)
+- [Stanford CS336: Language Modeling from Scratch](https://stanford-cs336.github.io/spring2024/) (2024, 课件免费)
+- [CMU 11-868: Large Language Models](https://llms-11-868.github.io/) (2024, 课件免费)
+- [Maxime Labonne: LLM Course](https://github.com/mlabonne/llm-course) (GitHub, 免费)
+- [Full Stack LLM Bootcamp](https://fullstackdeeplearning.com/llm-bootcamp/) (视频免费)
 
-## 9.3 硬件建议
+## 11.3 硬件建议
 
 ### 个人学习
 ```
@@ -2152,61 +2376,71 @@ Infra:
 # 附录：关键论文清单
 
 ## Tokenizer
-- Sennrich et al. (2016) — BPE for NMT
-- Kudo & Richardson (2018) — SentencePiece
-- Kudo (2018) — Subword Regularization (Unigram)
+- [Sennrich et al. (2016) — BPE for NMT](https://arxiv.org/abs/1508.07909)
+- [Kudo & Richardson (2018) — SentencePiece](https://arxiv.org/abs/1808.06226)
+- [Kudo (2018) — Subword Regularization (Unigram)](https://arxiv.org/abs/1804.10959)
 
 ## Architecture
-- Vaswani et al. (2017) — Transformer
-- Su et al. (2021) — RoPE
-- Shazeer (2019) — Multi-Query Attention
-- Ainslie et al. (2023) — GQA
-- Shazeer (2020) — GLU Variants (SwiGLU)
-- Zhang & Sennrich (2019) — RMSNorm
-- Dao et al. (2022, 2023) — FlashAttention 1/2/3
+- [Vaswani et al. (2017) — Transformer](https://arxiv.org/abs/1706.03762)
+- [Su et al. (2021) — RoPE](https://arxiv.org/abs/2104.09864)
+- [Shazeer (2019) — Multi-Query Attention](https://arxiv.org/abs/1911.02150)
+- [Ainslie et al. (2023) — GQA](https://arxiv.org/abs/2305.13245)
+- [Shazeer (2020) — GLU Variants (SwiGLU)](https://arxiv.org/abs/2002.05202)
+- [Zhang & Sennrich (2019) — RMSNorm](https://arxiv.org/abs/1910.07467)
+- [Dao et al. (2022) — FlashAttention](https://arxiv.org/abs/2205.14135)
+- [Dao (2023) — FlashAttention-2](https://arxiv.org/abs/2307.08691)
 
 ## Pretraining
-- Radford et al. (2019) — GPT-2
-- Brown et al. (2020) — GPT-3
-- Kaplan et al. (2020) — Scaling Laws
-- Hoffmann et al. (2022) — Chinchilla
-- Touvron et al. (2023a, 2023b) — LLaMA 1/2
-- Dubey et al. (2024) — LLaMA 3
-- DeepSeek (2024, 2025) — DeepSeek-V2/V3/R1
+- [Radford et al. (2019) — GPT-2](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf)
+- [Brown et al. (2020) — GPT-3](https://arxiv.org/abs/2005.14165)
+- [Kaplan et al. (2020) — Scaling Laws](https://arxiv.org/abs/2001.08361)
+- [Hoffmann et al. (2022) — Chinchilla](https://arxiv.org/abs/2203.15556)
+- [Touvron et al. (2023a) — LLaMA](https://arxiv.org/abs/2302.13971)
+- [Touvron et al. (2023b) — LLaMA 2](https://arxiv.org/abs/2307.09288)
+- [Dubey et al. (2024) — LLaMA 3](https://arxiv.org/abs/2407.21783)
+- [DeepSeek (2024) — DeepSeek-V2](https://arxiv.org/abs/2405.04434)
+- [DeepSeek (2024) — DeepSeek-V3](https://arxiv.org/abs/2412.19437)
+- [DeepSeek (2025) — DeepSeek-R1](https://arxiv.org/abs/2501.12948)
 
 ## Post-Training
-- Ouyang et al. (2022) — InstructGPT (RLHF)
-- Schulman et al. (2017) — PPO
-- Rafailov et al. (2023) — DPO
-- Bai et al. (2022) — Constitutional AI
-- Shao et al. (2024) — DeepSeekMath (GRPO)
+- [Ouyang et al. (2022) — InstructGPT (RLHF)](https://arxiv.org/abs/2203.02155)
+- [Schulman et al. (2017) — PPO](https://arxiv.org/abs/1707.06347)
+- [Rafailov et al. (2023) — DPO](https://arxiv.org/abs/2305.18290)
+- [Bai et al. (2022) — Constitutional AI](https://arxiv.org/abs/2212.08073)
+- [Shao et al. (2024) — DeepSeekMath (GRPO)](https://arxiv.org/abs/2402.03300)
+- [Lightman et al. (2023) — Process Reward Models](https://arxiv.org/abs/2305.20050)
+
+## PEFT
+- [Hu et al. (2021) — LoRA](https://arxiv.org/abs/2106.09685)
+- [Dettmers et al. (2023) — QLoRA](https://arxiv.org/abs/2305.14314)
+- [Li & Liang (2021) — Prefix Tuning](https://arxiv.org/abs/2101.00190)
+- [Liu et al. (2024) — DoRA](https://arxiv.org/abs/2402.09353)
 
 ## MoE
-- Shazeer et al. (2017) — Sparsely-Gated MoE
-- Lepikhin et al. (2021) — GShard
-- Fedus et al. (2022) — Switch Transformer
-- Jiang et al. (2024) — Mixtral
-- DeepSeek (2024) — DeepSeekMoE
+- [Shazeer et al. (2017) — Sparsely-Gated MoE](https://arxiv.org/abs/1701.06538)
+- [Lepikhin et al. (2021) — GShard](https://arxiv.org/abs/2006.16668)
+- [Fedus et al. (2022) — Switch Transformer](https://arxiv.org/abs/2101.03961)
+- [Jiang et al. (2024) — Mixtral](https://arxiv.org/abs/2401.04088)
 
 ## Multimodal
-- Radford et al. (2021) — CLIP
-- Liu et al. (2023, 2024) — LLaVA
-- Alayrac et al. (2022) — Flamingo
-- Team Gemini (2023) — Gemini
-- Rombach et al. (2022) — Latent Diffusion (Stable Diffusion)
-- Peebles & Xie (2023) — DiT
+- [Radford et al. (2021) — CLIP](https://arxiv.org/abs/2103.00020)
+- [Liu et al. (2023) — LLaVA](https://arxiv.org/abs/2304.08485)
+- [Alayrac et al. (2022) — Flamingo](https://arxiv.org/abs/2204.14198)
+- [Team Gemini (2023) — Gemini](https://arxiv.org/abs/2312.11805)
+- [Rombach et al. (2022) — Latent Diffusion](https://arxiv.org/abs/2112.10752)
+- [Peebles & Xie (2023) — DiT](https://arxiv.org/abs/2212.09748)
 
 ## Reasoning
-- Wei et al. (2022) — Chain-of-Thought
-- Lightman et al. (2023) — Process Reward Models
-- DeepSeek (2025) — DeepSeek-R1
+- [Wei et al. (2022) — Chain-of-Thought](https://arxiv.org/abs/2201.11903)
+- [Lightman et al. (2023) — Process Reward Models](https://arxiv.org/abs/2305.20050)
+- [Snell et al. (2024) — Scaling LLM Test-Time Compute](https://arxiv.org/abs/2408.03314)
 
 ## Infra
-- Shoeybi et al. (2019) — Megatron-LM
-- Rajbhandari et al. (2020) — ZeRO
-- Narayanan et al. (2021) — Pipeline Parallelism
-- Kwon et al. (2023) — PagedAttention (vLLM)
-- Leviathan et al. (2023) — Speculative Decoding
+- [Shoeybi et al. (2019) — Megatron-LM](https://arxiv.org/abs/1909.08053)
+- [Rajbhandari et al. (2020) — ZeRO](https://arxiv.org/abs/1910.02054)
+- [Narayanan et al. (2021) — Pipeline Parallelism](https://arxiv.org/abs/2104.04473)
+- [Kwon et al. (2023) — PagedAttention (vLLM)](https://arxiv.org/abs/2309.06180)
+- [Leviathan et al. (2023) — Speculative Decoding](https://arxiv.org/abs/2211.17192)
 
 ---
 
