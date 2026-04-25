@@ -4,49 +4,87 @@
 
 面向想系统掌握 LLM 全栈训练能力的工程师。覆盖理论、工程、SOTA 和实战。
 
-## 全景图
+## 全景图: 从数据到部署
 
 ```mermaid
-graph LR
-    A[原始文本] --> B[Tokenizer]
-    B --> C[Token IDs]
-    C --> D[预训练<br/>Next Token Prediction]
-    D --> E[Base Model]
-    E --> F[SFT]
-    F --> G[RLHF / DPO]
-    G --> H[对齐模型]
-    H --> I[量化 / 部署]
+flowchart LR
+    subgraph DATA["<b>① 数据</b>"]
+        D1["Web Crawl\nWikipedia\n代码/数学"] --> D2["清洗\n去重\n过滤"]
+    end
 
-    style D fill:#e1f5fe
-    style F fill:#fff3e0
-    style G fill:#fff3e0
-    style I fill:#e8f5e9
+    subgraph TOK["<b>② Tokenizer</b>"]
+        D2 --> T1["BPE / Unigram\n训练词表"]
+        T1 --> T2["Token IDs"]
+    end
+
+    subgraph PRE["<b>③ 预训练</b>"]
+        T2 --> P1["Transformer\nGQA · MoE · MLA\nRoPE · SwiGLU"]
+        P1 --> |"Next Token\nPrediction"| P2["Base Model"]
+    end
+
+    subgraph POST["<b>④ 后训练</b>"]
+        P2 --> S1["SFT\n指令微调"]
+        S1 --> S2["RLHF / DPO\n偏好优化"]
+        S2 --> S3["Safety\n安全训练"]
+    end
+
+    subgraph DEPLOY["<b>⑤ 部署</b>"]
+        S3 --> Q1["量化\nINT4/FP8"]
+        Q1 --> Q2["推理服务\nvLLM · SGLang"]
+    end
+
+    style DATA fill:#e3f2fd,stroke:#1565c0,color:#0d47a1
+    style TOK fill:#e3f2fd,stroke:#1565c0,color:#0d47a1
+    style PRE fill:#e8eaf6,stroke:#283593,color:#1a237e
+    style POST fill:#fff3e0,stroke:#e65100,color:#bf360c
+    style DEPLOY fill:#e8f5e9,stroke:#2e7d32,color:#1b5e20
 ```
 
+## 知识地图: 章节关系
+
 ```mermaid
-graph TB
-    subgraph 训练阶段
-        PT[预训练] --> PostT[后训练]
-        PostT --> Deploy[部署]
+flowchart TB
+    subgraph core["核心训练流程"]
+        direction LR
+        ch1["<a href='chapters/01-tokenizer.md'>① Tokenizer</a>"]
+        ch2["<a href='chapters/02-architecture.md'>② 架构</a>"]
+        ch3["<a href='chapters/03-pretraining.md'>③ 预训练</a>"]
+        ch4["<a href='chapters/04-post-training.md'>④ 后训练</a>"]
+        ch1 --> ch2 --> ch3 --> ch4
     end
 
-    subgraph 预训练
-        Data[数据处理] --> Tokenize[Tokenizer]
-        Tokenize --> Arch[模型架构]
-        Arch --> Infra[分布式训练]
+    subgraph infra["工程基础设施"]
+        direction LR
+        ch5["<a href='chapters/05-peft.md'>⑤ PEFT\nLoRA/QLoRA</a>"]
+        ch6["<a href='chapters/06-infra.md'>⑥ 分布式训练\nTP/PP/DP</a>"]
+        ch7["<a href='chapters/07-inference.md'>⑦ 推理部署\n量化/vLLM</a>"]
     end
 
-    subgraph 后训练
-        SFT[SFT 指令微调] --> Pref[偏好优化 RLHF/DPO]
-        Pref --> Safety[安全训练]
-        PEFT[LoRA / QLoRA] -.-> SFT
+    subgraph extend["能力扩展"]
+        direction LR
+        ch8["<a href='chapters/08-embedding-rag.md'>⑧ Embedding\n& RAG</a>"]
+        ch9["<a href='chapters/09-multimodal.md'>⑨ 多模态\nVLM/Video</a>"]
+        ch10["<a href='chapters/10-safety-alignment.md'>⑩ 安全\n& 对齐</a>"]
     end
 
-    subgraph 部署
-        Quant[量化] --> Serve[推理框架 vLLM]
-        Serve --> RAG[RAG / Embedding]
-        Serve --> Agent[Agent / Tool Use]
+    subgraph ref["参考"]
+        direction LR
+        ch11["<a href='chapters/11-sota-models.md'>⑪ SOTA\n模型解析</a>"]
+        ch12["<a href='chapters/12-distillation-merging.md'>⑫ 蒸馏\n& 合并</a>"]
+        ch13["<a href='chapters/13-roadmap.md'>⑬ 路线图\n& 资源</a>"]
     end
+
+    ch4 -.-> ch5
+    ch3 -.-> ch6
+    ch4 -.-> ch7
+    ch7 -.-> ch8
+    ch3 -.-> ch9
+    ch4 -.-> ch10
+
+    style core fill:#e8eaf6,stroke:#3949ab
+    style infra fill:#e0f2f1,stroke:#00695c
+    style extend fill:#fce4ec,stroke:#c62828
+    style ref fill:#f3e5f5,stroke:#6a1b9a
 ```
 
 ## 章节目录
