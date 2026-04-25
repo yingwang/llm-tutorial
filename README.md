@@ -4,6 +4,8 @@
 
 面向想系统掌握 LLM 全栈训练能力的工程师。覆盖理论、工程、SOTA 和实战。
 
+**[English Version](en/README.md)**
+
 ## 全景图: 从数据到部署
 
 ```mermaid
