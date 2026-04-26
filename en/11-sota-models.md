@@ -147,6 +147,26 @@ Mistral Large 2:
 
 **Trend**: Small models + high-quality data + over-training → excellent cost-effectiveness. On-device deployment (phones, PCs) is a key direction.
 
+## Key Papers
+
+- [Llama Team (2024) — Llama 3](https://arxiv.org/abs/2407.21783) — full disclosure of 405B training
+- [DeepSeek-AI (2024) — DeepSeek-V3](https://arxiv.org/abs/2412.19437) — MoE + FP8 training, extreme cost optimization
+- [Qwen Team (2024) — Qwen2.5 Technical Report](https://arxiv.org/abs/2412.15115) — Chinese-friendly open-weights at all sizes
+- [OpenAI (2023) — GPT-4 Technical Report](https://arxiv.org/abs/2303.08774) — high-level methodology and evaluation
+- [Mistral AI (2023) — Mistral 7B](https://arxiv.org/abs/2310.06825) — sliding-window attention
+
+## Further Reading
+
+- [Open LLM Leaderboard](https://huggingface.co/spaces/open-llm-leaderboard/open_llm_leaderboard) — head-to-head comparison
+- [Chatbot Arena](https://lmarena.ai/) — human preference leaderboard
+- [HuggingFace model index](https://huggingface.co/models) — read the source releases
+
+## Exercises
+
+1. **Deep-read one tech report**: pick Llama 3 or DeepSeek-V3 and read end-to-end; produce a "my notes" doc (data, architecture, hyperparams, evals).
+2. **Same-size head-to-head**: with the same prompts, run Llama-3-8B, Qwen2.5-7B, Mistral-7B-v0.3 on tasks you care about; do blind scoring.
+3. **Reproduce one detail**: pick one technique (YaRN context extension, MTP, MLA) and implement a toy version on a small model; understand why it works.
+
 ---
 
 [← Previous Chapter](10-safety.md) | [Table of Contents](README.md) | [Next Chapter →](12-distillation-merging.md)

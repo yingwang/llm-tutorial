@@ -246,4 +246,26 @@ User query → Agent decides:
 
 **Practical advice**: The three approaches are often combined. Fine-tune to teach the model format and style, RAG for real-time knowledge, and long context for a small number of key documents.
 
+## Key Papers
+
+- [Devlin et al. (2018) — BERT](https://arxiv.org/abs/1810.04805) — encoder paradigm and the [CLS] representation
+- [Reimers & Gurevych (2019) — Sentence-BERT](https://arxiv.org/abs/1908.10084) — the standard recipe for dual-encoder retrieval
+- [Karpukhin et al. (2020) — DPR](https://arxiv.org/abs/2004.04906) — Dense Passage Retrieval
+- [Khattab & Zaharia (2020) — ColBERT](https://arxiv.org/abs/2004.12832) — late interaction, token-level matching
+- [Lewis et al. (2020) — RAG](https://arxiv.org/abs/2005.11401) — the original retrieval-augmented generation paper
+
+## Further Reading
+
+- [BGE Embedding family](https://github.com/FlagOpen/FlagEmbedding) — open-source embedding SOTA
+- [LangChain](https://github.com/langchain-ai/langchain) / [LlamaIndex](https://github.com/run-llama/llama_index) — RAG orchestration frameworks
+- [Chroma](https://www.trychroma.com/) / [Qdrant](https://qdrant.tech/) / [Milvus](https://milvus.io/) — vector database options
+
+## Exercises
+
+1. **MTEB-style eval**: compare BGE-large-zh vs OpenAI text-embedding-3-large on your own corpus, measuring retrieval@5.
+2. **Chunking ablation**: with the model fixed, sweep chunk size {256, 512, 1024} and overlap {0, 64, 128}; measure QA accuracy.
+3. **Hybrid search**: implement weighted fusion of BM25 + dense; tune the weight and quantify improvement over dense-only.
+
+---
+
 [← Previous Chapter](07-inference.md) | [Table of Contents](README.md) | [Next Chapter →](09-multimodal.md)

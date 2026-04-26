@@ -171,6 +171,24 @@ print(output.ids)
 - **Whitespace handling**: 保留前导空格作为 token 一部分（GPT 风格）vs 单独 token
 - **Code tokens**: 保留缩进（tab、多空格）作为特殊 token，提升代码生成
 
+## 关键论文
+
+- [Sennrich et al. (2016) — Neural Machine Translation of Rare Words with Subword Units](https://arxiv.org/abs/1508.07909) — BPE 在 NMT 中的开山之作
+- [Kudo & Richardson (2018) — SentencePiece](https://arxiv.org/abs/1808.06226) — 把分词从空格依赖中解放出来
+- [Kudo (2018) — Subword Regularization (Unigram LM)](https://arxiv.org/abs/1804.10959) — 与 BPE 不同的概率化路径
+
+## 进一步阅读
+
+- Karpathy — [Let's build the GPT Tokenizer](https://www.youtube.com/watch?v=zduSFxRajkE)：从头写 BPE 的 2 小时视频
+- HuggingFace — [Tokenizers 文档](https://huggingface.co/docs/tokenizers)：工业级实现
+- OpenAI — [tiktoken](https://github.com/openai/tiktoken)：GPT 系列官方 tokenizer
+
+## 练习题
+
+1. **从零实现 BPE**：在英文小语料（如莎士比亚）上手写训练 BPE 词表（目标 1K tokens），与 `tokenizers` 库结果对比。
+2. **多语言对比**：用 GPT-2 和 Llama 3 的 tokenizer 分别 encode 同一段中文，比较 token 数量。理解为什么中文模型需要扩词表。
+3. **数字处理**：找一段含数字（日期、价格、电话）的文本，看 GPT-2 vs Qwen tokenizer 怎么切，哪种更利于数学能力。
+
 ---
 
 [← 目录](../README.md) | [下一章 →](02-architecture.md)

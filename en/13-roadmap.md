@@ -315,6 +315,19 @@ Cloud GPU: Lambda, RunPod, vast.ai on-demand
 - [Kwon et al. (2023) — PagedAttention (vLLM)](https://arxiv.org/abs/2309.06180)
 - [Leviathan et al. (2023) — Speculative Decoding](https://arxiv.org/abs/2211.17192)
 
+## Further Reading
+
+- Book: Sebastian Raschka — *Build a Large Language Model (From Scratch)* — implement a GPT end-to-end
+- Course: [Stanford CS25 — Transformers United](https://web.stanford.edu/class/cs25/)
+- Course: [NYU/Yann LeCun — Deep Learning](https://atcold.github.io/NYU-DLSP21/)
+- Stay current: [Sebastian Raschka — Ahead of AI](https://magazine.sebastianraschka.com/), [Nathan Lambert — Interconnects](https://www.interconnects.ai/), [Jay Alammar's Blog](https://jalammar.github.io/)
+
+## Exercises (project-scale)
+
+1. **Train a 100M model from scratch**: use nanoGPT on OpenWebText (or a Chinese mini-corpus) to train a 124M GPT; carry it through the full pipeline — pretrain → SFT → DPO → quantize → vLLM serve.
+2. **Build an enterprise RAG**: pick a document set you know well (≥1000 docs); implement chunking + embedding + retrieval + generation + evaluation; write up "lessons learned and footguns I hit."
+3. **Reproduce a SOTA paper**: pick a recent arxiv paper (e.g. GRPO, MTP, MLA); do a toy reproduction on a small model; write a blog post explaining the mechanism and its limits.
+
 ---
 
 > Last updated: 2026-04-25

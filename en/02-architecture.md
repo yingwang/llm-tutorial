@@ -296,6 +296,26 @@ Optimal tokens ≈ 20 × parameter count
 | [Qwen2 72B](https://arxiv.org/abs/2407.10671) | 72.7B | 80 | 8192 | 64 | 8 (GQA) | 152K | 128K |
 | [DeepSeek-V3](https://arxiv.org/abs/2412.19437) | 671B | 61 | 7168 | 128 | MLA | 128K | 128K |
 
+## Key Papers
+
+- [Vaswani et al. (2017) — Attention Is All You Need](https://arxiv.org/abs/1706.03762) — the original Transformer paper, required reading
+- [Su et al. (2021) — RoFormer / RoPE](https://arxiv.org/abs/2104.09864) — the now-standard positional encoding
+- [Ainslie et al. (2023) — GQA](https://arxiv.org/abs/2305.13245) — KV-cache savings used by Llama 2/3
+- [Fedus et al. (2021) — Switch Transformer](https://arxiv.org/abs/2101.03961) — modern MoE formulation
+- [DeepSeek-AI (2024) — DeepSeek-V2 / MLA](https://arxiv.org/abs/2405.04434) — Multi-head Latent Attention
+
+## Further Reading
+
+- Karpathy — [nanoGPT](https://github.com/karpathy/nanoGPT) — GPT in ~300 lines of PyTorch
+- Harvard NLP — [The Annotated Transformer](http://nlp.seas.harvard.edu/annotated-transformer/) — line-by-line annotations of the original paper
+- Lilian Weng — [The Transformer Family Version 2.0](https://lilianweng.github.io/posts/2023-01-27-the-transformer-family-v2/)
+
+## Exercises
+
+1. **Implement attention from scratch**: build scaled dot-product attention in numpy, then extend to multi-head.
+2. **MHA → GQA refactor**: convert nanoGPT's MHA to GQA (kv heads = q heads / 4) and observe the KV-cache reduction.
+3. **RoPE experiment**: on a small transformer, compare sinusoidal, ALiBi, and RoPE on length extrapolation (train at 512, test at 1024).
+
 ---
 
 [← Previous Chapter](01-tokenizer.md) | [Table of Contents](README.md) | [Next Chapter →](03-pretraining.md)

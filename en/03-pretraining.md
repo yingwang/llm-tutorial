@@ -281,6 +281,26 @@ GPU 3: tokens 96K-128K   → compute attention chunk
            ↻ KV blocks passed between GPUs in a ring
 ```
 
+## Key Papers
+
+- [Brown et al. (2020) — GPT-3](https://arxiv.org/abs/2005.14165) — few-shot learning, opened the LLM era
+- [Hoffmann et al. (2022) — Chinchilla](https://arxiv.org/abs/2203.15556) — scaling laws, optimal tokens/params ≈ 20
+- [Touvron et al. (2023) — Llama 2](https://arxiv.org/abs/2307.09288) — open-weight engineering details
+- [DeepSeek-AI (2024) — DeepSeek-V3 Technical Report](https://arxiv.org/abs/2412.19437) — MoE + FP8 + MTP
+- [Liu et al. (2023) — Ring Attention](https://arxiv.org/abs/2310.01889) — long-context training
+
+## Further Reading
+
+- [Karpathy — Let's reproduce GPT-2 (124M)](https://www.youtube.com/watch?v=l8pRSuU81PU) — 4-hour walkthrough training GPT-2
+- [Llama 3 — Model Card & Tech Report](https://arxiv.org/abs/2407.21783) — full picture of 405B training
+- [Eleuther — The Pile](https://arxiv.org/abs/2101.00027) — open large-scale corpus construction
+
+## Exercises
+
+1. **Chinchilla math**: given a budget of 2× H100 for 1 week (~2000 PFLOP/s), compute Chinchilla-optimal model size and token count.
+2. **Reproduce GPT-2 with nanoGPT**: train a 124M model on OpenWebText; track loss curves and perplexity.
+3. **Data ablation**: replace 5% of training data with high-quality code (StarCoder) or math (MATH); observe whether HumanEval / GSM8K improves.
+
 ---
 
 [← Previous Chapter](02-architecture.md) | [Table of Contents](README.md) | [Next Chapter →](04-post-training.md)

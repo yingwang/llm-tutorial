@@ -296,6 +296,26 @@ x = x + Attention(LayerNorm(x)) + FFN(LayerNorm(x))
 | [Qwen2 72B](https://arxiv.org/abs/2407.10671) | 72.7B | 80 | 8192 | 64 | 8 (GQA) | 152K | 128K |
 | [DeepSeek-V3](https://arxiv.org/abs/2412.19437) | 671B | 61 | 7168 | 128 | MLA | 128K | 128K |
 
+## 关键论文
+
+- [Vaswani et al. (2017) — Attention Is All You Need](https://arxiv.org/abs/1706.03762) — Transformer 原始论文，必读
+- [Su et al. (2021) — RoFormer / RoPE](https://arxiv.org/abs/2104.09864) — 现代主流位置编码
+- [Ainslie et al. (2023) — GQA](https://arxiv.org/abs/2305.13245) — Llama 2/3 的 KV cache 节省方案
+- [Fedus et al. (2021) — Switch Transformer](https://arxiv.org/abs/2101.03961) — MoE 现代化范式
+- [DeepSeek-AI (2024) — DeepSeek-V2 / MLA](https://arxiv.org/abs/2405.04434) — Multi-head Latent Attention
+
+## 进一步阅读
+
+- Karpathy — [nanoGPT](https://github.com/karpathy/nanoGPT)：约 300 行 PyTorch 实现 GPT
+- Harvard NLP — [The Annotated Transformer](http://nlp.seas.harvard.edu/annotated-transformer/)：逐行注解原论文
+- Lilian Weng — [The Transformer Family Version 2.0](https://lilianweng.github.io/posts/2023-01-27-the-transformer-family-v2/)
+
+## 练习题
+
+1. **手写 attention**：从 numpy 开始实现 scaled dot-product attention，再扩到 multi-head。
+2. **MHA → GQA 改造**：把 nanoGPT 的 MHA 改成 GQA（kv heads = q heads / 4），观察 KV cache 减小的效果。
+3. **RoPE 实验**：对一个小 transformer，对比 Sinusoidal、ALiBi、RoPE 三种位置编码在外推（训练 512，测试 1024）上的差异。
+
 ---
 
 [← 上一章](01-tokenizer.md) | [目录](../README.md) | [下一章 →](03-pretraining.md)

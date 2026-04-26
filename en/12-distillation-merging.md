@@ -68,6 +68,26 @@ dtype: bfloat16
 
 **Practical use**: Merge a general model + a math model + a code model to get a model good at all three, without any additional training. Many top models on the [Open LLM Leaderboard](https://huggingface.co/spaces/open-llm-leaderboard/open_llm_leaderboard) are produced this way.
 
+## Key Papers
+
+- [Hinton et al. (2015) — Distilling the Knowledge in a Neural Network](https://arxiv.org/abs/1503.02531) — the foundational KD paper
+- [Sanh et al. (2019) — DistilBERT](https://arxiv.org/abs/1910.01108) — the classic 6-layer BERT distillation
+- [Gu et al. (2023) — MiniLLM](https://arxiv.org/abs/2306.08543) — reverse KL for generative tasks
+- [Wortsman et al. (2022) — Model Soups](https://arxiv.org/abs/2203.05482) — averaging multiple fine-tune checkpoints
+- [Yadav et al. (2023) — TIES-Merging](https://arxiv.org/abs/2306.01708) — resolving merge conflicts
+
+## Further Reading
+
+- [mergekit](https://github.com/arcee-ai/mergekit) — the de facto merging toolkit
+- [DistilBERT companion blog](https://medium.com/huggingface/distilbert-8cf3380435b5)
+- [Awesome KD](https://github.com/dkozlov/awesome-knowledge-distillation) — methods survey
+
+## Exercises
+
+1. **Simple KD**: distill Qwen2-7B (teacher) into a 1.5B student; compare student-from-SFT-only vs. student-from-KD-SFT.
+2. **Model Soup**: train three fine-tunes (different seeds / data subsets); average their weights and check whether the soup beats any single one.
+3. **TIES vs DARE**: with two complementary models in mergekit, try TIES, DARE, and SLERP; record evaluation deltas.
+
 ---
 
 [← Previous Chapter](11-sota-models.md) | [Table of Contents](README.md) | [Next Chapter →](13-roadmap.md)

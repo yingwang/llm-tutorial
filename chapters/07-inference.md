@@ -233,4 +233,26 @@ $/GPU-hour = 云 GPU 租价
 5. Speculative decoding: 减少大模型前向次数
 ```
 
+## 关键论文
+
+- [Kwon et al. (2023) — vLLM / PagedAttention](https://arxiv.org/abs/2309.06180) — KV 显存分页，吞吐 24 倍提升
+- [Leviathan et al. (2022) — Speculative Decoding](https://arxiv.org/abs/2211.17192) — 小模型预测 + 大模型验证
+- [Cai et al. (2024) — Medusa](https://arxiv.org/abs/2401.10774) — 多头并行预测加速
+- [Frantar et al. (2022) — GPTQ](https://arxiv.org/abs/2210.17323) — 4-bit 后训练量化
+- [Lin et al. (2023) — AWQ](https://arxiv.org/abs/2306.00978) — Activation-aware 量化
+
+## 进一步阅读
+
+- [vLLM](https://github.com/vllm-project/vllm) / [SGLang](https://github.com/sgl-project/sglang) / [TensorRT-LLM](https://github.com/NVIDIA/TensorRT-LLM)：三大推理引擎对比
+- [llama.cpp](https://github.com/ggerganov/llama.cpp)：CPU/边缘推理参考
+- Hao Zhang — [Towards 100x Speedup: Full Stack Transformer Inference Optimization](https://yaofu.notion.site/Towards-100x-Speedup-Full-Stack-Transformer-Inference-Optimization-43124c3688e14cffaf2f1d6cbdf26c39)
+
+## 练习题
+
+1. **吞吐对比**：同一模型（如 Qwen2-7B），分别用 HuggingFace generate / vLLM / SGLang 跑 100 并发，对比 tokens/s。
+2. **量化精度**：把 Llama-3-8B 量到 4-bit (AWQ vs GPTQ)，比较 MMLU 掉点情况。
+3. **Speculative Decoding 实战**：用 Llama-3-8B 作 target，TinyLlama-1.1B 作 draft，跑同一 prompt，记录 token acceptance rate 和总加速比。
+
+---
+
 [← 上一章](06-infra.md) | [目录](../README.md) | [下一章 →](08-embedding-rag.md)

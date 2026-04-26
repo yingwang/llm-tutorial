@@ -181,4 +181,26 @@ Level 5: Scalable oversight
 □ User feedback mechanism (report button)
 ```
 
+## Key Papers
+
+- [Bai et al. (2022) — Constitutional AI](https://arxiv.org/abs/2212.08073) — RLAIF and principle-driven alignment
+- [Bai et al. (2022) — HH-RLHF](https://arxiv.org/abs/2204.05862) — Helpful & Harmless dataset
+- [Inan et al. (2023) — Llama Guard](https://arxiv.org/abs/2312.06674) — input/output safety classifier
+- [Perez et al. (2022) — Red Teaming Language Models](https://arxiv.org/abs/2202.03286)
+- [Liang et al. (2022) — HELM](https://arxiv.org/abs/2211.09110) — holistic evaluation framework
+
+## Further Reading
+
+- [Anthropic — Core Views on AI Safety](https://www.anthropic.com/news/core-views-on-ai-safety)
+- [OWASP — Top 10 for LLM Applications](https://owasp.org/www-project-top-10-for-large-language-model-applications/)
+- [HuggingFace — Evaluating the MMLU](https://huggingface.co/blog/evaluating-mmlu-leaderboard) — caveats in MMLU evaluation
+
+## Exercises
+
+1. **Red-team experiment**: write 20 jailbreak prompts (role-play, prefix injection, low-resource-language workarounds, etc.); measure success rate against Llama 3 and Qwen2.
+2. **Train your own guard**: fine-tune a small model on ToxiGen or BeaverTails as an input classifier.
+3. **MMLU eval**: run lm-evaluation-harness on two open models; analyze 5-shot vs 0-shot differences.
+
+---
+
 [← Previous Chapter](09-multimodal.md) | [Table of Contents](README.md) | [Next Chapter →](11-sota-models.md)

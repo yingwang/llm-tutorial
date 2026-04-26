@@ -360,6 +360,26 @@ MFU = 实际计算量 / (理论峰值算力 × 训练时间)
 - Kernel 效率
 - Gradient checkpointing 的重计算开销
 
+## 关键论文
+
+- [Rajbhandari et al. (2019) — ZeRO](https://arxiv.org/abs/1910.02054) — 数据并行下的显存优化（DeepSpeed 核心）
+- [Shoeybi et al. (2019) — Megatron-LM](https://arxiv.org/abs/1909.08053) — Tensor Parallelism 在 transformer 上的实现
+- [Huang et al. (2018) — GPipe](https://arxiv.org/abs/1811.06965) — Pipeline Parallelism 经典工作
+- [Dao et al. (2022) — FlashAttention](https://arxiv.org/abs/2205.14135) — IO-aware attention，2-4x 加速
+- [Dao (2023) — FlashAttention-2](https://arxiv.org/abs/2307.08691) — 进一步并行优化
+
+## 进一步阅读
+
+- [Megatron-LM repo](https://github.com/NVIDIA/Megatron-LM)：3D 并行参考实现
+- [DeepSpeed docs](https://www.deepspeed.ai/)：ZeRO-1/2/3 配置
+- [How to Train Really Large Models](https://lilianweng.github.io/posts/2021-09-25-train-large/) — Lilian Weng
+
+## 练习题
+
+1. **显存预算**：估算训练 70B 模型所需 GPU 数量（FP16，AdamW，batch=1M tokens），分别在 ZeRO-1/2/3 下算一遍。
+2. **profile 训练**：用 PyTorch profiler 跑 nanoGPT 一个 step，找出耗时最多的 op，对比启用 FlashAttention 前后。
+3. **3D 并行配比**：给定 64 张 H100，训练 70B，思考 (DP, TP, PP) 的合理切法，并解释 TP 为何不能跨节点。
+
 ---
 
 [← 上一章](05-peft.md) | [目录](../README.md) | [下一章 →](07-inference.md)

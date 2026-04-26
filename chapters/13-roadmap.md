@@ -315,6 +315,19 @@
 - [Kwon et al. (2023) — PagedAttention (vLLM)](https://arxiv.org/abs/2309.06180)
 - [Leviathan et al. (2023) — Speculative Decoding](https://arxiv.org/abs/2211.17192)
 
+## 进一步阅读
+
+- 书：Sebastian Raschka — *Build a Large Language Model (From Scratch)* — 从 0 实现一个 GPT
+- 课：[Stanford CS25 — Transformers United](https://web.stanford.edu/class/cs25/)
+- 课：[NYU/Yann LeCun — Deep Learning](https://atcold.github.io/NYU-DLSP21/)
+- 持续追踪：[Sebastian Raschka — Ahead of AI](https://magazine.sebastianraschka.com/)、[Nathan Lambert — Interconnects](https://www.interconnects.ai/)、[Jay Alammar's Blog](https://jalammar.github.io/)
+
+## 练习题（项目级）
+
+1. **从 0 训练一个 100M 模型**：用 nanoGPT 在 OpenWebText（或中文小语料）上训一个 124M GPT，跑通 pretrain → SFT → DPO → 量化 → vLLM 部署 全链路。
+2. **构建一个企业 RAG**：选一份你的公司/兴趣领域的文档集合（≥1000 文档），实现 chunking + embedding + retrieval + generation + 评测，写一份"我学到的踩坑笔记"。
+3. **复现一篇 SOTA 工作**：选一个近 6 个月的 arxiv 论文（如 GRPO、MTP、MLA），用一个小模型做 toy 复现，写博客解释原理与局限。
+
 ---
 
 > 最后更新: 2026-04-25

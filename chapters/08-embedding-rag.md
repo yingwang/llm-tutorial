@@ -246,4 +246,26 @@ Stage 2: Cross-encoder (慢但准, 从 top-100 选 top-5)
 
 **实际建议**: 三者经常组合使用。Fine-tune 让模型学会格式和风格，RAG 提供实时知识，长上下文处理少量关键文档。
 
+## 关键论文
+
+- [Devlin et al. (2018) — BERT](https://arxiv.org/abs/1810.04805) — encoder 范式与 [CLS] 表征
+- [Reimers & Gurevych (2019) — Sentence-BERT](https://arxiv.org/abs/1908.10084) — 双塔检索的标准做法
+- [Karpukhin et al. (2020) — DPR](https://arxiv.org/abs/2004.04906) — Dense Passage Retrieval
+- [Khattab & Zaharia (2020) — ColBERT](https://arxiv.org/abs/2004.12832) — late interaction，token 级匹配
+- [Lewis et al. (2020) — RAG](https://arxiv.org/abs/2005.11401) — 检索增强生成原始论文
+
+## 进一步阅读
+
+- [BGE Embedding 系列](https://github.com/FlagOpen/FlagEmbedding)：开源 embedding SOTA
+- [LangChain](https://github.com/langchain-ai/langchain) / [LlamaIndex](https://github.com/run-llama/llama_index)：RAG 编排框架
+- [Chroma](https://www.trychroma.com/) / [Qdrant](https://qdrant.tech/) / [Milvus](https://milvus.io/)：向量数据库选型
+
+## 练习题
+
+1. **MTEB 评测**：用 BGE-large-zh 和 OpenAI text-embedding-3-large 在你的私有语料上对比 retrieval@5。
+2. **Chunking 实验**：固定模型，对比 256/512/1024 token chunk 与 overlap 0/64/128 对答题准确率的影响。
+3. **Hybrid Search**：实现 BM25 + dense 加权融合，调权重，看比纯 dense 提升多少。
+
+---
+
 [← 上一章](07-inference.md) | [目录](../README.md) | [下一章 →](09-multimodal.md)

@@ -360,6 +360,26 @@ Good MFU:
 - Kernel efficiency
 - Recomputation overhead from gradient checkpointing
 
+## Key Papers
+
+- [Rajbhandari et al. (2019) — ZeRO](https://arxiv.org/abs/1910.02054) — memory optimization under data parallelism (the heart of DeepSpeed)
+- [Shoeybi et al. (2019) — Megatron-LM](https://arxiv.org/abs/1909.08053) — Tensor Parallelism for transformers
+- [Huang et al. (2018) — GPipe](https://arxiv.org/abs/1811.06965) — the classic Pipeline Parallelism paper
+- [Dao et al. (2022) — FlashAttention](https://arxiv.org/abs/2205.14135) — IO-aware attention, 2–4× speedup
+- [Dao (2023) — FlashAttention-2](https://arxiv.org/abs/2307.08691) — further parallelism optimizations
+
+## Further Reading
+
+- [Megatron-LM repo](https://github.com/NVIDIA/Megatron-LM) — reference 3D-parallel implementation
+- [DeepSpeed docs](https://www.deepspeed.ai/) — ZeRO-1/2/3 configuration
+- [How to Train Really Large Models](https://lilianweng.github.io/posts/2021-09-25-train-large/) — Lilian Weng
+
+## Exercises
+
+1. **Memory budget**: estimate GPU count needed to train a 70B model (FP16, AdamW, batch=1M tokens) under ZeRO-1, 2, and 3.
+2. **Profile training**: use PyTorch profiler on one nanoGPT step; identify the slowest op and compare before/after FlashAttention.
+3. **3D-parallel tradeoff**: with 64 H100s for a 70B model, choose a reasonable (DP, TP, PP) configuration and explain why TP shouldn't cross nodes.
+
 ---
 
 [← Previous Chapter](05-peft.md) | [Table of Contents](README.md) | [Next Chapter →](07-inference.md)

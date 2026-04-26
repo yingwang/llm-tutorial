@@ -147,6 +147,26 @@ Mistral Large 2:
 
 **趋势**: 小模型 + 高质量数据 + 过训练 → 性价比极高。端侧部署 (手机、PC) 是重要方向。
 
+## 关键论文
+
+- [Llama Team (2024) — Llama 3](https://arxiv.org/abs/2407.21783) — 405B 训练全揭秘
+- [DeepSeek-AI (2024) — DeepSeek-V3](https://arxiv.org/abs/2412.19437) — MoE + FP8 训练，成本极致优化
+- [Qwen Team (2024) — Qwen2.5 Technical Report](https://arxiv.org/abs/2412.15115) — 中文友好的全尺寸开源
+- [OpenAI (2023) — GPT-4 Technical Report](https://arxiv.org/abs/2303.08774) — 高层方法与评测
+- [Mistral AI (2023) — Mistral 7B](https://arxiv.org/abs/2310.06825) — sliding window attention
+
+## 进一步阅读
+
+- [Open LLM Leaderboard](https://huggingface.co/spaces/open-llm-leaderboard/open_llm_leaderboard)：各模型横评
+- [Chatbot Arena](https://lmarena.ai/)：人类偏好榜单
+- [Model Card 集合](https://huggingface.co/models)：阅读各家发布原文
+
+## 练习题
+
+1. **细读一篇技术报告**：选 Llama 3 或 DeepSeek-V3 的 tech report 完整读一遍，输出"我的笔记"（数据、架构、训练超参、评测）。
+2. **同尺寸对比**：在你关心的任务上，用相同 prompt 跑 Llama-3-8B、Qwen2.5-7B、Mistral-7B-v0.3，做盲测打分。
+3. **复现一个细节**：选一个具体技术（YaRN 扩 context、MTP、MLA），用一个小模型做 toy 实现，理解为什么有效。
+
 ---
 
 [← 上一章](10-safety.md) | [目录](../README.md) | [下一章 →](12-distillation-merging.md)

@@ -181,4 +181,26 @@ Level 5: Scalable oversight (可扩展的监督)
 □ 用户反馈机制 (举报按钮)
 ```
 
+## 关键论文
+
+- [Bai et al. (2022) — Constitutional AI](https://arxiv.org/abs/2212.08073) — RLAIF 与原则驱动对齐
+- [Bai et al. (2022) — HH-RLHF](https://arxiv.org/abs/2204.05862) — Helpful & Harmless 数据
+- [Inan et al. (2023) — Llama Guard](https://arxiv.org/abs/2312.06674) — 输入/输出安全分类器
+- [Perez et al. (2022) — Red Teaming Language Models](https://arxiv.org/abs/2202.03286)
+- [Liang et al. (2022) — HELM](https://arxiv.org/abs/2211.09110) — 综合评测框架
+
+## 进一步阅读
+
+- [Anthropic — Core Views on AI Safety](https://www.anthropic.com/news/core-views-on-ai-safety)
+- [OWASP — Top 10 for LLM Applications](https://owasp.org/www-project-top-10-for-large-language-model-applications/)
+- [HuggingFace — Model evaluation](https://huggingface.co/blog/evaluating-mmlu-leaderboard)：MMLU 评测的注意事项
+
+## 练习题
+
+1. **Red-team 实验**：列 20 条 jailbreak prompt（角色扮演、prefix injection、低资源语言绕过等），分别测 Llama 3 与 Qwen2，统计成功率。
+2. **训自己的 Guard**：用 ToxiGen 或 BeaverTails 数据，微调一个小模型作 input classifier。
+3. **MMLU 评测**：用 lm-evaluation-harness 在两个开源模型上跑 MMLU，分析 5-shot vs 0-shot 差异。
+
+---
+
 [← 上一章](09-multimodal.md) | [目录](../README.md) | [下一章 →](11-sota-models.md)

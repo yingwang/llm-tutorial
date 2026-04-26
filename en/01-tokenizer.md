@@ -171,6 +171,24 @@ Multilingual support is a major challenge for tokenizers:
 - **Whitespace handling**: Preserve leading spaces as part of the token (GPT style) vs separate tokens
 - **Code tokens**: Preserve indentation (tabs, multiple spaces) as special tokens to improve code generation
 
+## Key Papers
+
+- [Sennrich et al. (2016) — Neural Machine Translation of Rare Words with Subword Units](https://arxiv.org/abs/1508.07909) — the BPE landmark for NMT
+- [Kudo & Richardson (2018) — SentencePiece](https://arxiv.org/abs/1808.06226) — frees tokenization from whitespace assumptions
+- [Kudo (2018) — Subword Regularization (Unigram LM)](https://arxiv.org/abs/1804.10959) — a probabilistic alternative to BPE
+
+## Further Reading
+
+- Karpathy — [Let's build the GPT Tokenizer](https://www.youtube.com/watch?v=zduSFxRajkE) — 2-hour walkthrough writing BPE from scratch
+- HuggingFace — [Tokenizers docs](https://huggingface.co/docs/tokenizers) — industrial-strength implementation
+- OpenAI — [tiktoken](https://github.com/openai/tiktoken) — official GPT-family tokenizer
+
+## Exercises
+
+1. **Implement BPE from scratch**: train a 1K-token BPE vocab on a small English corpus (e.g. Shakespeare); compare against the `tokenizers` library.
+2. **Multilingual comparison**: encode the same Chinese passage with the GPT-2 and Llama 3 tokenizers; compare token counts. Understand why Chinese-focused models need vocabulary extension.
+3. **Number handling**: find text with digits (dates, prices, phone numbers); compare how GPT-2 vs Qwen tokenizers split them and which favors math.
+
 ---
 
 [← Table of Contents](README.md) | [Next Chapter →](02-architecture.md)

@@ -301,6 +301,26 @@ Observation → Thought → Action → Observation → Thought → Action → ..
 - Model reads code, edits files, runs tests
 - reward = tests pass
 
+## Key Papers
+
+- [Ouyang et al. (2022) — InstructGPT](https://arxiv.org/abs/2203.02155) — the classic three-stage RLHF
+- [Rafailov et al. (2023) — DPO](https://arxiv.org/abs/2305.18290) — preference optimization without a reward model
+- [Shao et al. (2024) — DeepSeekMath / GRPO](https://arxiv.org/abs/2402.03300) — the RL algorithm behind DeepSeek-R1
+- [Bai et al. (2022) — Constitutional AI](https://arxiv.org/abs/2212.08073) — RLAIF and principle-driven alignment
+- [Bai et al. (2022) — HH-RLHF](https://arxiv.org/abs/2204.05862) — Helpful & Harmless dataset and methodology
+
+## Further Reading
+
+- HuggingFace — [TRL library](https://github.com/huggingface/trl) — production SFT / DPO / GRPO / PPO
+- Nathan Lambert — [Interconnects.ai](https://www.interconnects.ai/) — ongoing post-training coverage
+- [DeepSeek-R1 paper](https://arxiv.org/abs/2501.12948) — pure RL eliciting reasoning
+
+## Exercises
+
+1. **SFT fine-tune**: use TRL to SFT a 1.5B base model on Alpaca-cleaned; compare base vs. SFT on MT-Bench.
+2. **DPO experiment**: from the same SFT checkpoint, run DPO on UltraFeedback; observe win-rate changes.
+3. **Reward hacking watch**: deliberately undertrain a reward model and run PPO; observe how the policy "games" the reward (repetition, special characters, exaggerated outputs).
+
 ---
 
 [← Previous Chapter](03-pretraining.md) | [Table of Contents](README.md) | [Next Chapter →](05-peft.md)

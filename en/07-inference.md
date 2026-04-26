@@ -233,4 +233,26 @@ Cost reduction strategies:
 5. Speculative decoding: Reduce the number of large-model forward passes
 ```
 
+## Key Papers
+
+- [Kwon et al. (2023) — vLLM / PagedAttention](https://arxiv.org/abs/2309.06180) — KV-cache paging, 24× throughput gain
+- [Leviathan et al. (2022) — Speculative Decoding](https://arxiv.org/abs/2211.17192) — small-model proposes, large-model verifies
+- [Cai et al. (2024) — Medusa](https://arxiv.org/abs/2401.10774) — multi-head parallel prediction
+- [Frantar et al. (2022) — GPTQ](https://arxiv.org/abs/2210.17323) — 4-bit post-training quantization
+- [Lin et al. (2023) — AWQ](https://arxiv.org/abs/2306.00978) — activation-aware quantization
+
+## Further Reading
+
+- [vLLM](https://github.com/vllm-project/vllm) / [SGLang](https://github.com/sgl-project/sglang) / [TensorRT-LLM](https://github.com/NVIDIA/TensorRT-LLM) — the three big inference engines
+- [llama.cpp](https://github.com/ggerganov/llama.cpp) — reference for CPU/edge inference
+- Hao Zhang — [Towards 100x Speedup: Full Stack Transformer Inference Optimization](https://yaofu.notion.site/Towards-100x-Speedup-Full-Stack-Transformer-Inference-Optimization-43124c3688e14cffaf2f1d6cbdf26c39)
+
+## Exercises
+
+1. **Throughput comparison**: serve the same model (e.g., Qwen2-7B) with HuggingFace generate / vLLM / SGLang at 100 concurrency; compare tokens/s.
+2. **Quantization quality**: quantize Llama-3-8B to 4-bit with AWQ vs GPTQ; compare MMLU degradation.
+3. **Speculative decoding hands-on**: use Llama-3-8B as target and TinyLlama-1.1B as draft on the same prompt; record token acceptance rate and end-to-end speedup.
+
+---
+
 [← Previous Chapter](06-infra.md) | [Table of Contents](README.md) | [Next Chapter →](08-embedding-rag.md)

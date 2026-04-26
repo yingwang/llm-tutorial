@@ -301,6 +301,26 @@ Observation → Thought → Action → Observation → Thought → Action → ..
 - 模型读代码、编辑文件、跑测试
 - reward = 测试通过
 
+## 关键论文
+
+- [Ouyang et al. (2022) — InstructGPT](https://arxiv.org/abs/2203.02155) — 经典 RLHF 三阶段
+- [Rafailov et al. (2023) — DPO](https://arxiv.org/abs/2305.18290) — 跳过 reward model 的偏好优化
+- [Shao et al. (2024) — DeepSeekMath / GRPO](https://arxiv.org/abs/2402.03300) — DeepSeek-R1 用的 RL 算法
+- [Bai et al. (2022) — Constitutional AI](https://arxiv.org/abs/2212.08073) — RLAIF 与原则驱动对齐
+- [Bai et al. (2022) — HH-RLHF](https://arxiv.org/abs/2204.05862) — Helpful & Harmless 数据集与方法
+
+## 进一步阅读
+
+- HuggingFace — [TRL 库](https://github.com/huggingface/trl)：SFT / DPO / GRPO / PPO 工业实现
+- Nathan Lambert — [Interconnects.ai](https://www.interconnects.ai/)：post-training 持续追踪
+- [DeepSeek-R1 论文](https://arxiv.org/abs/2501.12948)：纯 RL 涌现推理能力
+
+## 练习题
+
+1. **SFT 微调**：用 TRL 在 Alpaca-cleaned 上对一个 1.5B base 模型做 SFT，对比 base 与 SFT 模型在 MT-Bench 上的差异。
+2. **DPO 实验**：用相同 SFT 检查点 + UltraFeedback 数据跑 DPO；观察 win rate 变化。
+3. **奖励黑客观察**：跑 PPO 时故意把 reward model 训得不充分，看模型如何"骗"reward（重复、特殊字符、夸张回答）。
+
 ---
 
 [← 上一章](03-pretraining.md) | [目录](../README.md) | [下一章 →](05-peft.md)

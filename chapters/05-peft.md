@@ -135,6 +135,26 @@ model = get_peft_model(model, lora_config)
 - [unsloth](https://github.com/unslothai/unsloth) — 2x 加速 LoRA 微调（手写 kernel）
 - [LLaMA-Factory](https://github.com/hiyouga/LLaMA-Factory) — 中文社区常用的微调框架
 
+## 关键论文
+
+- [Hu et al. (2021) — LoRA](https://arxiv.org/abs/2106.09685) — 低秩适配，PEFT 主流方法
+- [Dettmers et al. (2023) — QLoRA](https://arxiv.org/abs/2305.14314) — 4-bit 量化 + LoRA，单卡训 65B
+- [Houlsby et al. (2019) — Adapter](https://arxiv.org/abs/1902.00751) — 最早的参数高效适配器
+- [Li & Liang (2021) — Prefix Tuning](https://arxiv.org/abs/2101.00190) — 给 attention 注入可学习前缀
+- [Liu et al. (2022) — IA³](https://arxiv.org/abs/2205.05638) — 比 LoRA 还少参数
+
+## 进一步阅读
+
+- HuggingFace — [PEFT 库](https://github.com/huggingface/peft)：所有方法统一接口
+- [Ahead of AI — Practical Tips for Finetuning LLMs Using LoRA](https://magazine.sebastianraschka.com/p/practical-tips-for-finetuning-llms)
+- [QLoRA 配套代码](https://github.com/artidoro/qlora)
+
+## 练习题
+
+1. **LoRA 微调**：用 PEFT 库给 Qwen2-1.5B 加 LoRA（rank=8），在 Alpaca 上微调，对比全参微调的显存与效果。
+2. **rank 扫描**：固定数据，扫 LoRA rank ∈ {1, 4, 16, 64}，画 loss vs rank 曲线，找 sweet spot。
+3. **多 LoRA 合并**：训 2 个不同任务的 LoRA（中译英 + 代码生成），用 mergekit 合并，看是否同时具备两种能力。
+
 ---
 
 [← 上一章](04-post-training.md) | [目录](../README.md) | [下一章 →](06-infra.md)

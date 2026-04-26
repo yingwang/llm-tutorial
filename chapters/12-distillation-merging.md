@@ -68,6 +68,26 @@ dtype: bfloat16
 
 **实际用途**: 合并一个通用模型 + 一个数学模型 + 一个代码模型 → 得到一个三者兼备的模型，不需要额外训练。[Open LLM Leaderboard](https://huggingface.co/spaces/open-llm-leaderboard/open_llm_leaderboard) 上很多顶级模型是合并得到的。
 
+## 关键论文
+
+- [Hinton et al. (2015) — Distilling the Knowledge in a Neural Network](https://arxiv.org/abs/1503.02531) — 知识蒸馏奠基
+- [Sanh et al. (2019) — DistilBERT](https://arxiv.org/abs/1910.01108) — 经典 6 层 BERT 蒸馏
+- [Gu et al. (2023) — MiniLLM](https://arxiv.org/abs/2306.08543) — 反向 KL，针对生成任务
+- [Wortsman et al. (2022) — Model Soups](https://arxiv.org/abs/2203.05482) — 多个 fine-tune 检查点平均
+- [Yadav et al. (2023) — TIES-Merging](https://arxiv.org/abs/2306.01708) — 解决合并冲突
+
+## 进一步阅读
+
+- [mergekit](https://github.com/arcee-ai/mergekit)：合并工具事实标准
+- [DistilBERT 配套博客](https://medium.com/huggingface/distilbert-8cf3380435b5)
+- [Awesome KD](https://github.com/dkozlov/awesome-knowledge-distillation)：方法综述
+
+## 练习题
+
+1. **简单 KD**：从 Qwen2-7B (teacher) 蒸馏出 1.5B (student)，对比 student 直接 SFT 与 KD-SFT 的效果。
+2. **Model Soup**：训 3 个不同种子 / 数据子集的 fine-tune，用平均权重合并，看是否优于任意单个。
+3. **TIES vs DARE**：用 mergekit 在两个能力互补的模型上分别试 TIES、DARE、SLERP，记录评测变化。
+
 ---
 
 [← 上一章](11-sota-models.md) | [目录](../README.md) | [下一章 →](13-roadmap.md)

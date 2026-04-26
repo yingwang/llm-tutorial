@@ -235,6 +235,26 @@ Gemini 2: 多模态输入输出 + 工具使用
 2. **Mixed training**: 在统一 token 序列上做 next-token prediction
 3. **Modality-specific heads**: 不同模态的解码头
 
+## 关键论文
+
+- [Radford et al. (2021) — CLIP](https://arxiv.org/abs/2103.00020) — 对比学习对齐图文表征
+- [Liu et al. (2023) — LLaVA](https://arxiv.org/abs/2304.08485) — 经典 vision-language fine-tune 范式
+- [Alayrac et al. (2022) — Flamingo](https://arxiv.org/abs/2204.14198) — Cross-attention 注入视觉 token
+- [Bai et al. (2023) — Qwen-VL](https://arxiv.org/abs/2308.12966) — 中文友好的开源 VLM
+- [Radford et al. (2022) — Whisper](https://arxiv.org/abs/2212.04356) — 多语言 ASR 标杆
+
+## 进一步阅读
+
+- [LLaVA 系列](https://github.com/haotian-liu/LLaVA)：训练脚本与模型
+- [Cambrian-1](https://arxiv.org/abs/2406.16860)：vision encoder 系统比较
+- [Qwen2-VL](https://arxiv.org/abs/2409.12191)：动态分辨率与视频理解
+
+## 练习题
+
+1. **VLM 推理**：用 Qwen-VL 描述一张图，再问关于图中细节的问题，观察 hallucination。
+2. **Encoder 对比**：在同一份 LLaVA 数据上，分别用 CLIP-ViT-L/14 和 SigLIP 作 vision encoder，比较 VQA 准确率。
+3. **多模态 RAG**：建立"图-文"索引（用 CLIP embedding），实现以文搜图 + 多图问答。
+
 ---
 
 [← 上一章](08-evaluation.md) | [目录](../README.md) | [下一章 →](10-sota-models.md)

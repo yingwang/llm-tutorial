@@ -135,6 +135,26 @@ model = get_peft_model(model, lora_config)
 - [unsloth](https://github.com/unslothai/unsloth) — 2x faster LoRA fine-tuning (hand-written kernels)
 - [LLaMA-Factory](https://github.com/hiyouga/LLaMA-Factory) — Popular fine-tuning framework in the Chinese community
 
+## Key Papers
+
+- [Hu et al. (2021) — LoRA](https://arxiv.org/abs/2106.09685) — low-rank adaptation, the dominant PEFT method
+- [Dettmers et al. (2023) — QLoRA](https://arxiv.org/abs/2305.14314) — 4-bit quantization + LoRA, fits 65B on a single GPU
+- [Houlsby et al. (2019) — Adapter](https://arxiv.org/abs/1902.00751) — the original parameter-efficient adapter
+- [Li & Liang (2021) — Prefix Tuning](https://arxiv.org/abs/2101.00190) — learnable prefixes injected into attention
+- [Liu et al. (2022) — IA³](https://arxiv.org/abs/2205.05638) — even fewer parameters than LoRA
+
+## Further Reading
+
+- HuggingFace — [PEFT library](https://github.com/huggingface/peft) — unified interface for all methods
+- [Ahead of AI — Practical Tips for Finetuning LLMs Using LoRA](https://magazine.sebastianraschka.com/p/practical-tips-for-finetuning-llms)
+- [QLoRA companion code](https://github.com/artidoro/qlora)
+
+## Exercises
+
+1. **LoRA fine-tune**: use PEFT to attach LoRA (rank=8) to Qwen2-1.5B and fine-tune on Alpaca; compare memory and quality vs full fine-tuning.
+2. **Rank sweep**: fix the dataset and sweep LoRA rank ∈ {1, 4, 16, 64}; plot loss vs rank to find the sweet spot.
+3. **Multi-LoRA merge**: train two task-specific LoRAs (Chinese-English translation + code generation), merge with mergekit, and check whether both capabilities are retained.
+
 ---
 
 [← Previous Chapter](04-post-training.md) | [Table of Contents](README.md) | [Next Chapter →](06-infra.md)

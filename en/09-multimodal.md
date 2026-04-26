@@ -235,6 +235,26 @@ Any modality → Unified Token Space → Autoregressive Generation → Any modal
 2. **Mixed training**: Next-token prediction on unified token sequences
 3. **Modality-specific heads**: Different decoding heads for different modalities
 
+## Key Papers
+
+- [Radford et al. (2021) — CLIP](https://arxiv.org/abs/2103.00020) — contrastive learning aligning image and text
+- [Liu et al. (2023) — LLaVA](https://arxiv.org/abs/2304.08485) — the classic vision-language fine-tune recipe
+- [Alayrac et al. (2022) — Flamingo](https://arxiv.org/abs/2204.14198) — cross-attention injection of visual tokens
+- [Bai et al. (2023) — Qwen-VL](https://arxiv.org/abs/2308.12966) — Chinese-friendly open VLM
+- [Radford et al. (2022) — Whisper](https://arxiv.org/abs/2212.04356) — multilingual ASR benchmark
+
+## Further Reading
+
+- [LLaVA series](https://github.com/haotian-liu/LLaVA) — training scripts and models
+- [Cambrian-1](https://arxiv.org/abs/2406.16860) — systematic comparison of vision encoders
+- [Qwen2-VL](https://arxiv.org/abs/2409.12191) — dynamic resolution and video understanding
+
+## Exercises
+
+1. **VLM inference**: ask Qwen-VL to describe an image, then probe details; observe hallucination patterns.
+2. **Encoder comparison**: with the same LLaVA-style data, swap CLIP-ViT-L/14 vs SigLIP as the vision encoder; compare VQA accuracy.
+3. **Multimodal RAG**: index images and text via CLIP embeddings; implement text-to-image retrieval and multi-image QA.
+
 ---
 
 [← Previous Chapter](08-evaluation.md) | [Table of Contents](README.md) | [Next Chapter →](10-sota-models.md)

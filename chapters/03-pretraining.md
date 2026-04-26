@@ -281,6 +281,26 @@ GPU 3: tokens 96K-128K   → 计算 attention chunk
            ↻ KV blocks 在 GPU 间 ring 传递
 ```
 
+## 关键论文
+
+- [Brown et al. (2020) — GPT-3](https://arxiv.org/abs/2005.14165) — few-shot 学习，开启大模型时代
+- [Hoffmann et al. (2022) — Chinchilla](https://arxiv.org/abs/2203.15556) — Scaling laws，token / 参数比 ≈ 20
+- [Touvron et al. (2023) — Llama 2](https://arxiv.org/abs/2307.09288) — 开源大模型工程细节
+- [DeepSeek-AI (2024) — DeepSeek-V3 Technical Report](https://arxiv.org/abs/2412.19437) — MoE + FP8 + MTP
+- [Liu et al. (2023) — Ring Attention](https://arxiv.org/abs/2310.01889) — 超长上下文训练
+
+## 进一步阅读
+
+- [Karpathy — Let's reproduce GPT-2 (124M)](https://www.youtube.com/watch?v=l8pRSuU81PU)：4 小时手写训练 GPT-2
+- [Llama 3 — Model Card & Tech Report](https://arxiv.org/abs/2407.21783)：405B 训练全貌
+- [Eleuther — The Pile](https://arxiv.org/abs/2101.00027)：开源大规模语料构建
+
+## 练习题
+
+1. **Chinchilla 推算**：给定 2x H100（约 2000 PFLOP/s）训练 1 周的算力预算，按 Chinchilla 最优算出能训多大的模型 + 多少 token。
+2. **跑 nanoGPT 复现 GPT-2**：用 OpenWebText 训一个 124M 模型，记录 loss 曲线和 perplexity。
+3. **数据消融**：把训练集中 5% 替换为高质量代码（StarCoder）或数学（MATH），观察 HumanEval / GSM8K 是否提升。
+
 ---
 
 [← 上一章](02-architecture.md) | [目录](../README.md) | [下一章 →](04-post-training.md)
