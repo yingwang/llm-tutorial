@@ -35,6 +35,9 @@ flowchart LR
         Q1 --> Q2["Serving\nvLLM · SGLang"]
     end
 
+    classDef step fill:#ffffff,stroke:#555,color:#222
+    class D1,D2,T1,T2,P1,P2,S1,S2,S3,Q1,Q2 step
+
     style DATA fill:#e3f2fd,stroke:#1565c0,color:#0d47a1
     style TOK fill:#e3f2fd,stroke:#1565c0,color:#0d47a1
     style PRE fill:#e8eaf6,stroke:#283593,color:#1a237e
@@ -82,6 +85,9 @@ flowchart TB
     ch7 -.-> ch8
     ch3 -.-> ch9
     ch4 -.-> ch10
+
+    classDef chapter fill:#ffffff,stroke:#555,color:#222
+    class ch1,ch2,ch3,ch4,ch5,ch6,ch7,ch8,ch9,ch10,ch11,ch12,ch13 chapter
 
     style core fill:#e8eaf6,stroke:#3949ab
     style infra fill:#e0f2f1,stroke:#00695c
