@@ -4,7 +4,7 @@
 
 A comprehensive guide for engineers who want to master the full stack of LLM training. Covers theory, engineering, SOTA, and hands-on practice.
 
-**[中文版 / Chinese Version](../README.md)**
+**[中文版 / Chinese Version](../README.md)** | **Read online**: [yingwang.github.io/llm-tutorial](https://yingwang.github.io/llm-tutorial/) (search, dark mode, sidebar TOC)
 
 ## Overview: From Data to Deployment
 
