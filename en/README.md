@@ -144,6 +144,32 @@ If you already have a foundation, jump to any chapter that interests you.
 | LLM Evaluation | [github.com/EleutherAI/lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness) |
 | Chatbot Arena Leaderboard | [huggingface.co/spaces/lmsys/chatbot-arena-leaderboard](https://huggingface.co/spaces/lmsys/chatbot-arena-leaderboard) |
 
+## Author
+
+Ying Wang
+
+## Citation
+
+If this tutorial is helpful to your work, please cite:
+
+```bibtex
+@misc{wang2026llmtutorial,
+  author = {Ying Wang},
+  title  = {LLM 训练工程师完全指南 / The Complete LLM Training Engineer Guide},
+  year   = {2026},
+  url    = {https://github.com/yingwang/llm-tutorial}
+}
+```
+
+## License
+
+This repository is **dual-licensed**:
+
+- **Prose and diagrams** (Mermaid flowcharts, explanatory text, chapter content): [CC BY-NC-SA 4.0](../LICENSE) — Attribution · NonCommercial · ShareAlike
+- **Code snippets** (Python/Bash examples within chapters): [MIT](../LICENSE-CODE) — free to use, including commercial, with copyright notice retained
+
+Copying code examples from this repository for learning or engineering work is not subject to the non-commercial restriction.
+
 ---
 
 > Last updated: 2026-04-25

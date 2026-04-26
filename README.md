@@ -148,9 +148,27 @@ flowchart TB
 
 Ying Wang
 
-## 许可
+## 引用
 
-[CC BY-NC-SA 4.0](LICENSE)
+如果本教程对你有帮助，欢迎引用：
+
+```bibtex
+@misc{wang2026llmtutorial,
+  author = {Ying Wang},
+  title  = {LLM 训练工程师完全指南 / The Complete LLM Training Engineer Guide},
+  year   = {2026},
+  url    = {https://github.com/yingwang/llm-tutorial}
+}
+```
+
+## 许可证
+
+本仓库采用**双重许可**：
+
+- **正文与示意图**（包括 Mermaid 流程图、解释性文字、章节内容）：[CC BY-NC-SA 4.0](LICENSE) — 署名 · 非商业 · 相同方式共享
+- **代码片段**（章节中的 Python/Bash 等示例）：[MIT](LICENSE-CODE) — 自由使用，含商业用途，仅需保留版权声明
+
+复制本仓库的代码示例用于学习或工程实践无需考虑非商业限制。
 
 ---
 
