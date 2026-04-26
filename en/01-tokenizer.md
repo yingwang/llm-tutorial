@@ -13,7 +13,7 @@ Neural networks operate on numerical tensors, not strings. The simplest approach
 The other extreme is word-level (one token per word), but:
 - The vocabulary explodes (English alone has hundreds of thousands of word forms)
 - Cannot handle OOV (out-of-vocabulary) words
-- Unfriendly to CJK languages (no whitespace-based word segmentation)
+- Poor fit for CJK languages, where whitespace doesn't mark word boundaries
 
 Subword tokenization is the compromise: frequent words are kept as whole tokens, while rare words are split into subword fragments.
 
@@ -83,7 +83,7 @@ This is equivalent to pointwise mutual information (PMI). High PMI means x and y
 5. Repeat 2-4 until vocabulary reaches target size
 ```
 
-**Advantage**: Unigram can output N-best segmentation results (probabilistic), which benefits regularization.
+**Advantage**: Unigram returns N-best segmentations probabilistically — useful for subword regularization at training time.
 
 **Users**: T5, LLaMA, Gemma, etc. all use [SentencePiece](https://github.com/google/sentencepiece)'s Unigram model.
 
@@ -151,9 +151,9 @@ print(output.ids)
 
 ## 1.5 Multilingual Tokenizer Design
 
-Multilingual support is a major challenge for tokenizers:
+Multilingual is where tokenizer design gets hard:
 
-**Problem**: If training data is predominantly English, BPE merges are biased toward English — a Chinese character may require 3-4 tokens (due to UTF-8 encoding), while an English word needs only 1 token. This means the effective context window for Chinese is only 1/3 of English.
+**The problem**: when training data is mostly English, BPE merges skew toward English. A Chinese character may take 3-4 tokens (UTF-8 bytes), while an English word takes one — so the effective context window for Chinese is roughly a third of what it is for English.
 
 **Solutions**:
 1. **Balanced training corpus**: Sample by language to ensure each language has sufficient data for merges
@@ -161,7 +161,7 @@ Multilingual support is a major challenge for tokenizers:
 3. **Language-specific pre-tokenization**: Use jieba/sentencepiece for Chinese word segmentation before running BPE
 4. **Character coverage**: Ensure high-frequency Chinese characters / Japanese kana exist as individual tokens
 
-**Fertility metric**: Measures a tokenizer's efficiency for a given language. `fertility = tokens / words` — closer to 1 is better. GPT-2's Chinese fertility is ~3.5, LLaMA 3's is ~1.5.
+**Fertility**: tokens-per-word ratio for a given language; the closer to 1, the more efficient. GPT-2 sits at ~3.5 on Chinese; LLaMA 3 brings it down to ~1.5.
 
 ## 1.6 SOTA Tokenizer Techniques
 
@@ -186,8 +186,8 @@ Multilingual support is a major challenge for tokenizers:
 ## Exercises
 
 1. **Implement BPE from scratch**: train a 1K-token BPE vocab on a small English corpus (e.g. Shakespeare); compare against the `tokenizers` library.
-2. **Multilingual comparison**: encode the same Chinese passage with the GPT-2 and Llama 3 tokenizers; compare token counts. Understand why Chinese-focused models need vocabulary extension.
-3. **Number handling**: find text with digits (dates, prices, phone numbers); compare how GPT-2 vs Qwen tokenizers split them and which favors math.
+2. **Multilingual comparison**: encode the same Chinese passage with the GPT-2 and Llama 3 tokenizers; compare token counts. Convince yourself why Chinese-focused models extend the vocabulary.
+3. **Number handling**: pick text full of digits (dates, prices, phone numbers); compare how the GPT-2 and Qwen tokenizers split them, and reason about which choice helps math.
 
 ---
 

@@ -143,7 +143,7 @@
 | [huggingface/trl](https://github.com/huggingface/trl) | SFT, DPO, PPO, RLOO |
 | [axolotl-ai-cloud/axolotl](https://github.com/axolotl-ai-cloud/axolotl) | All-in-one fine-tuning |
 | [unslothai/unsloth](https://github.com/unslothai/unsloth) | 2x faster LoRA |
-| [hiyouga/LLaMA-Factory](https://github.com/hiyouga/LLaMA-Factory) | Popular in the Chinese community |
+| [hiyouga/LLaMA-Factory](https://github.com/hiyouga/LLaMA-Factory) | Popular in China; broad model coverage |
 | [pytorch/torchtune](https://github.com/pytorch/torchtune) | PyTorch native |
 
 **Pretraining**:
@@ -215,10 +215,10 @@ Cloud GPU: Lambda, RunPod, vast.ai on-demand
 
 ### Large Scale
 ```
-256+ GPU
+256+ GPUs
   → Pretrain 70B+
   → Self-hosted or long-term cloud lease
-  → Requires dedicated infra engineers
+  → Needs dedicated infra engineers
 ```
 
 ## 13.4 Training Cost Reference
@@ -244,7 +244,7 @@ Cloud GPU: Lambda, RunPod, vast.ai on-demand
 | Full SFT | 70B | 32x A100 80GB | ~$2K | ~2 days |
 | DPO | 7B | 2x A100 80GB | ~$50 | ~6h |
 
-> Costs estimated based on cloud pricing of A100 ~$2/hr, H100 ~$3.5/hr, RTX 4090 ~$0.5/hr.
+> Estimates based on typical cloud rates: A100 ~$2/hr, H100 ~$3.5/hr, RTX 4090 ~$0.5/hr.
 
 ---
 

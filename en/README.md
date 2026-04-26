@@ -2,7 +2,7 @@
 
 > From Tokenizer to Post-Training, from single GPU to 10K-GPU clusters, from text to multimodal.
 
-A comprehensive guide for engineers who want to master the full stack of LLM training. Covers theory, engineering, SOTA, and hands-on practice.
+For engineers who want the full stack — theory, engineering, SOTA, and hands-on practice.
 
 **[中文版 / Chinese Version](../README.md)** | **Read online**: [yingwang.github.io/llm-tutorial](https://yingwang.github.io/llm-tutorial/) (search, dark mode, sidebar TOC)
 
@@ -118,11 +118,11 @@ flowchart TB
 | 405B | 16384x H100 | 15T | ~$50M+ | ~2 months |
 | 671B MoE | 2048x H800 | 14.8T | ~$5.5M | ~2 months |
 
-> Last row is DeepSeek-V3 — MoE architecture dramatically reduces cost.
+> Last row is DeepSeek-V3 — MoE drives the cost down by an order of magnitude vs a dense model of similar capability.
 
 ## Companion Code
 
-Runnable examples live in **[llm-tutorial-code](https://github.com/yingwang/llm-tutorial-code)** — one folder per chapter, starting with BPE / attention from scratch and growing toward pretrain / SFT / DPO / LoRA / inference serving.
+Runnable examples live in **[llm-tutorial-code](https://github.com/yingwang/llm-tutorial-code)** — one folder per chapter, from BPE and attention from scratch up through pretrain, SFT, DPO, LoRA, and inference serving.
 
 ## Glossary
 
@@ -138,7 +138,7 @@ If you're new to LLM training, read in this order:
 4. Get hands-on: run [nanoGPT](https://github.com/karpathy/nanoGPT)
 5. Come back and read the rest
 
-If you already have a foundation, jump to any chapter that interests you.
+Already have the basics? Jump straight to whatever chapter interests you.
 
 ## Key Links
 
@@ -158,7 +158,7 @@ Ying Wang
 
 ## Citation
 
-If this tutorial is helpful to your work, please cite:
+If this guide is useful in your work, please cite:
 
 ```bibtex
 @misc{wang2026llmtutorial,
@@ -176,7 +176,7 @@ This repository is **dual-licensed**:
 - **Prose and diagrams** (Mermaid flowcharts, explanatory text, chapter content): [CC BY-NC-SA 4.0](../LICENSE) — Attribution · NonCommercial · ShareAlike
 - **Code snippets** (Python/Bash examples within chapters): [MIT](../LICENSE-CODE) — free to use, including commercial, with copyright notice retained
 
-Copying code examples from this repository for learning or engineering work is not subject to the non-commercial restriction.
+In practice: code snippets are free to copy for any use, including commercial. The non-commercial restriction applies only to the prose and diagrams.
 
 ---
 
