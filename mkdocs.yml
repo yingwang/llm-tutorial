@@ -5,19 +5,8 @@ repo_url: https://github.com/yingwang/llm-tutorial
 repo_name: yingwang/llm-tutorial
 edit_uri: edit/main/
 
-docs_dir: .
+docs_dir: docs
 site_dir: _site
-
-# Files at the repo root that aren't documentation
-exclude_docs: |
-  mkdocs.yml
-  .github/
-  _site/
-  .git/
-  node_modules/
-
-# README.md at the repo root is the zh landing page
-# en/README.md is the en landing page
 use_directory_urls: true
 
 theme:

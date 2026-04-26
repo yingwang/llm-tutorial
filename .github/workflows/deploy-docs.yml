@@ -44,6 +44,14 @@ jobs:
             "pymdown-extensions>=10.7" \
             "mkdocs>=1.6"
 
+      - name: Assemble docs/ from chapters/ + en/
+        run: |
+          mkdir -p docs/chapters docs/en
+          cp README.md docs/README.md
+          cp -r chapters/. docs/chapters/
+          cp en/README.md docs/en/README.md
+          for f in en/[0-9]*.md; do cp "$f" "docs/en/$(basename "$f")"; done
+
       - name: Build site
         run: mkdocs build --site-dir _site
 
