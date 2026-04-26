@@ -120,6 +120,10 @@ flowchart TB
 
 > Last row is DeepSeek-V3 — MoE architecture dramatically reduces cost.
 
+## Glossary
+
+Unsure about an acronym? See the **[Glossary](00-glossary.md)** — 80+ entries covering architecture, training, PEFT, infra, inference, RAG, multimodal, and more.
+
 ## Getting Started
 
 If you're new to LLM training, read in this order:
