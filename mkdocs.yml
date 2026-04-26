@@ -63,6 +63,7 @@ markdown_extensions:
   - md_in_html
   - footnotes
   - tables
+  - mdx_truly_sane_lists
   - toc:
       permalink: true
       permalink_title: 链接到此节
