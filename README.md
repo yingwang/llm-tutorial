@@ -144,6 +144,14 @@ flowchart TB
 | LLM Evaluation | [github.com/EleutherAI/lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness) |
 | Chatbot Arena 排行榜 | [huggingface.co/spaces/lmsys/chatbot-arena-leaderboard](https://huggingface.co/spaces/lmsys/chatbot-arena-leaderboard) |
 
+## 作者
+
+Ying Wang
+
+## 许可
+
+[CC BY-NC-SA 4.0](LICENSE)
+
 ---
 
-> 最后更新: 2026-04-25
+> 最后更新: 2026-04-26
