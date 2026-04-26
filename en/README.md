@@ -4,7 +4,7 @@
 
 For engineers who want the full stack — theory, engineering, SOTA, and hands-on practice.
 
-**[中文版 / Chinese Version](../README.md)** | **Read online**: [yingwang.github.io/llm-tutorial](https://yingwang.github.io/llm-tutorial/) (search, dark mode, sidebar TOC)
+**[中文版 / Chinese Version](../README.md)** | **Read online**: [yingwang.github.io/llm-tutorial](https://yingwang.github.io/llm-tutorial/)
 
 ## Overview: From Data to Deployment
 
