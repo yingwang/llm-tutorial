@@ -120,6 +120,10 @@ flowchart TB
 
 > 最后一行是 DeepSeek-V3，MoE 架构大幅降低了成本。
 
+## 配套代码
+
+可运行示例放在独立仓库 **[llm-tutorial-code](https://github.com/yingwang/llm-tutorial-code)**：每章一个目录，从 BPE / Attention 起点，逐步覆盖 pretrain / SFT / DPO / LoRA / 推理服务等。
+
 ## 术语表
 
 不熟悉某个缩写？查 **[术语表](chapters/00-glossary.md)** — 涵盖架构、训练、PEFT、Infra、推理、RAG、多模态等 80+ 词条。

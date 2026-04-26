@@ -120,6 +120,10 @@ flowchart TB
 
 > Last row is DeepSeek-V3 — MoE architecture dramatically reduces cost.
 
+## Companion Code
+
+Runnable examples live in **[llm-tutorial-code](https://github.com/yingwang/llm-tutorial-code)** — one folder per chapter, starting with BPE / attention from scratch and growing toward pretrain / SFT / DPO / LoRA / inference serving.
+
 ## Glossary
 
 Unsure about an acronym? See the **[Glossary](00-glossary.md)** — 80+ entries covering architecture, training, PEFT, infra, inference, RAG, multimodal, and more.
