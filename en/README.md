@@ -2,7 +2,7 @@
 
 > From Tokenizer to Post-Training, from single GPU to 10K-GPU clusters, from text to multimodal.
 
-For engineers who want the full stack — theory, engineering, SOTA, and hands-on practice.
+For engineers seeking full-stack mastery: foundational theory, systems engineering, frontier architectures, and production practice.
 
 **[中文版 / Chinese Version](../README.md)** | **Read online**: [yingwang.github.io/llm-tutorial](https://yingwang.github.io/llm-tutorial/)
 
@@ -124,27 +124,27 @@ flowchart TB
 | 405B | 16384x H100 | 15T | ~$50M+ | ~2 months |
 | 671B MoE | 2048x H800 | 14.8T | ~$5.5M | ~2 months |
 
-> Last row is DeepSeek-V3 — MoE drives the cost down by an order of magnitude vs a dense model of similar capability.
+> The final row reflects DeepSeek-V3: MoE architecture slashes pretraining compute costs by nearly an order of magnitude compared to dense models of comparable capability.
 
 ## Companion Code
 
-Runnable examples live in **[llm-tutorial-code](https://github.com/yingwang/llm-tutorial-code)** — one folder per chapter, from BPE and attention from scratch up through pretrain, SFT, DPO, LoRA, and inference serving.
+Runnable implementations reside in **[llm-tutorial-code](https://github.com/yingwang/llm-tutorial-code)**, organized by chapter: from first-principles BPE tokenizers and attention kernels to full-scale pretraining, SFT, DPO, LoRA, and high-throughput inference serving.
 
 ## Glossary
 
-Unsure about an acronym? See the **[Glossary](00-glossary.md)** — 80+ entries covering architecture, training, PEFT, infra, inference, RAG, multimodal, and more.
+Need clarity on terminology? Consult the **[Glossary](00-glossary.md)**: 80+ structured entries spanning model architectures, training dynamics, PEFT, distributed infrastructure, serving engines, RAG systems, and multimodal paradigms.
 
 ## Getting Started
 
-If you're new to LLM training, read in this order:
+If you are new to LLM systems engineering, we recommend the following sequence:
 
-1. [Chapter 1: Tokenizer](01-tokenizer.md) — understand the input
-2. [Chapter 2: Architecture](02-architecture.md) — understand the model
-3. [Chapter 13: Roadmap](13-roadmap.md) — know what to learn and which tools to use
-4. Get hands-on: run [nanoGPT](https://github.com/karpathy/nanoGPT)
-5. Come back and read the rest
+1. [Chapter 1: Tokenizer](01-tokenizer.md): understand how raw text becomes discrete token sequences
+2. [Chapter 2: Architecture](02-architecture.md): master the fundamental building blocks of modern LLMs
+3. [Chapter 13: Roadmap](13-roadmap.md): chart your learning path and toolchain selection
+4. Get hands-on: build intuition with [nanoGPT](https://github.com/karpathy/nanoGPT)
+5. Return to explore the specialized systems chapters
 
-Already have the basics? Jump straight to whatever chapter interests you.
+Already familiar with the foundations? Jump directly to the specific topic you need.
 
 ## Key Links
 
@@ -179,10 +179,10 @@ If this guide is useful in your work, please cite:
 
 This repository is **dual-licensed**:
 
-- **Prose and diagrams** (Mermaid flowcharts, explanatory text, chapter content): [CC BY-NC-SA 4.0](../LICENSE) — Attribution · NonCommercial · ShareAlike
-- **Code snippets** (Python/Bash examples within chapters): [MIT](../LICENSE-CODE) — free to use, including commercial, with copyright notice retained
+- **Prose and diagrams** (Mermaid flowcharts, explanatory text, chapter content): [CC BY-NC-SA 4.0](../LICENSE) (Attribution · NonCommercial · ShareAlike)
+- **Code snippets** (Python/Bash examples within chapters): [MIT](../LICENSE-CODE) (free to use, including commercial, with copyright notice retained)
 
-In practice: code snippets are free to copy for any use, including commercial. The non-commercial restriction applies only to the prose and diagrams.
+In practice: code snippets are free to copy and adapt for any use, including commercial software. The non-commercial restriction applies only to the prose, book text, and original diagrams.
 
 ---
 

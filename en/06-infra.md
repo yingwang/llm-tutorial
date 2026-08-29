@@ -4,104 +4,111 @@
 
 # Chapter 6: Training Infrastructure
 
-## 6.1 Hardware
+Scaling large language models to hundreds of billions of parameters requires orchestrating multi-thousand GPU clusters with near-linear scaling efficiency, robust fault tolerance, and tight communication-computation overlap.
 
-### 6.1.1 GPU Selection
+## 6.1 Hardware Architecture
 
-| GPU | VRAM | BF16 TFLOPS | FP8 TFLOPS | Interconnect | Use Case |
-|-----|------|-------------|------------|------|------|
-| A100 80GB | 80GB HBM2e | 312 | - | NVLink 600GB/s | Mainstream training (2022-2024) |
-| H100 SXM | 80GB HBM3 | 989 | 1979 | NVLink 900GB/s | Current workhorse |
-| H200 | 141GB HBM3e | 989 | 1979 | NVLink 900GB/s | Large models (more VRAM) |
-| B200 | 192GB HBM3e | 2250 | 4500 | NVLink 1800GB/s | Next-gen workhorse |
-| MI300X (AMD) | 192GB HBM3 | 1307 | 2614 | Infinity Fabric | AMD alternative |
+### 6.1.1 Accelerator Selection Matrix
 
-**Key metrics**:
-- **VRAM capacity**: Determines the maximum model size that fits
-- **Memory bandwidth**: Determines inference speed (inference is memory-bound)
-- **Compute (TFLOPS)**: Determines training speed (training is compute-bound)
-- **Interconnect bandwidth**: Determines multi-GPU parallelism efficiency
+| Accelerator | VRAM Capacity | BF16 Tensor TFLOPS | FP8 Tensor TFLOPS | Interconnect Bandwidth | Primary Deployment Realm |
+|-------------|---------------|-------------------|-------------------|------------------------|--------------------------|
+| NVIDIA A100 | 80GB HBM2e | 312 | - | NVLink (600 GB/s) | Mature baseline clusters (2022-2024) |
+| NVIDIA H100 SXM | 80GB HBM3 | 989 | 1,979 | NVLink (900 GB/s) | Industry workhorse for pretraining |
+| NVIDIA H200 | 141GB HBM3e | 989 | 1,979 | NVLink (900 GB/s) | Memory-bound long-context pretraining |
+| NVIDIA B200 | 192GB HBM3e | 2,250 | 4,500 | NVLink (1,800 GB/s) | Next-generation scaling frontier |
+| AMD MI300X | 192GB HBM3 | 1,307 | 2,614 | Infinity Fabric (896 GB/s) | High-capacity open ecosystem alternative |
 
-### 6.1.2 Cluster Networking
+**Core Hardware Scaling Bottlenecks**:
+- **High Bandwidth Memory (HBM) Capacity**: Sets the hard ceiling on maximum parameter and activation storage per device.
+- **Memory Bandwidth**: Dictates decoding throughput in inference (which is memory-bandwidth bound).
+- **Tensor Core Compute**: Governs pretraining step time (which is compute-bound during large-batch matrix multiplication).
+- **Interconnect Bandwidth**: Determines the scaling efficiency of Tensor and Pipeline Parallelism across distributed ranks.
+
+### 6.1.2 Cluster Fabric Networking
 
 ```
-Intra-node:
-  GPU ←NVLink 900GB/s→ GPU    (8 GPUs fully connected)
+Intra-Node Domain:
+  GPU 0 ←── NVLink 900 GB/s (All-to-All Full Mesh) ──→ GPU 7 (Within 8-GPU Chassis)
 
-Inter-node:
-  Node ←InfiniBand 400Gb/s→ Node
+Inter-Node Cluster Fabric:
+  Node A ←── InfiniBand 400 Gbps / 800 Gbps (RDMA) ──→ Node B
   
-  400Gb IB ≈ 50GB/s (per direction)
-  NVLink ≈ 900GB/s
+  Bandwidth Disparity Analysis:
+  400 Gbps InfiniBand ≈ 50 GB/s per rail
+  NVLink 4.0          ≈ 900 GB/s bidirectional
   
-  So inter-node communication is ~18x slower than intra-node!
-  → Parallelism strategies must minimize inter-node communication
+  Physical Reality: Inter-node transfer is ~18x slower than intra-node NVLink.
+  Systems Rule: High-frequency collective operations (Tensor Parallelism) must be
+  confined strictly within single nodes, reserving inter-node fabric for DP and PP.
 ```
 
-**Large cluster topology** (e.g., 16K GPUs):
-```
-GPU (8) → Node → Leaf switch (32 nodes) → Spine switch → Fat-tree/Dragonfly
-```
+**Large Cluster Topology** (16K+ GPUs): Non-blocking Fat-Tree or Rail-Optimized Dragonfly topology organized via leaf, spine, and core InfiniBand switches.
 
-**Network issues**: When training large models, a single slow node or packet loss can slow down the entire job. Requirements:
-- [NCCL](https://github.com/NVIDIA/nccl) tuning
-- Topology-aware process placement
-- Fault tolerance (automatic detection and replacement of failed nodes)
+**Network Engineering Requirements**:
+- Automated NCCL tree and ring algorithm selection tailored to physical topology.
+- Rail-aligned process placement (ensuring rank $i$ on node $A$ communicates with rank $i$ on node $B$ through dedicated NICs).
+- Fast failover detection to isolate stragglers, silent data corruption, and flapping optical links.
 
-### 6.1.3 Storage
+### 6.1.3 Storage Hierarchies and I/O Bandwidth
 
 ```
-Training data reads:
-  → Distributed filesystem (Lustre, GPFS, WekaFS)
-  → Or object storage (S3) + local NVMe cache
+Training Data Ingestion:
+  Distributed Parallel Filesystem (Lustre / GPFS / WekaFS)
+  or High-Throughput Object Storage (S3) paired with local NVMe caching.
 
-Checkpoint writes:
-  → A single 70B model checkpoint is ~500GB
-  → Saving every 1000 steps → tens of TB per day
-  → Async checkpointing (non-blocking)
-  → Nebula/distributed checkpoint storage
+Checkpoint Ingestion and Egress:
+  Saving full model and optimizer states for a 70B parameter model produces ~500 GB per snapshot.
+  Periodic writes (e.g. every 1,000 steps) demand multi-terabyte burst bandwidth.
+  Mitigation: Asynchronous, non-blocking snapshot streaming to remote storage tiers.
 ```
 
-## 6.2 Distributed Training Strategies
+## 6.2 Distributed Parallelism Paradigms
 
-### 6.2.1 Data Parallelism (DP)
+### 6.2.1 Data Parallelism (DP) and DDP
 
-**The simplest parallelism strategy**: Each GPU holds a full model replica and processes different data.
-
-```
-GPU 0: Model copy + Data batch 0 → gradient_0
-GPU 1: Model copy + Data batch 1 → gradient_1
-GPU 2: Model copy + Data batch 2 → gradient_2
-GPU 3: Model copy + Data batch 3 → gradient_3
-          ↓ AllReduce: average gradients ↓
-GPU 0-3: Update model with averaged gradients
-```
-
-**Limitation**: Each GPU must hold the entire model. A 7B model (BF16) = 14GB parameters + optimizer states ~56GB → barely fits on one 80GB card. A 70B model won't fit.
-
-### 6.2.2 ZeRO (Zero Redundancy Optimizer)
-
-([Rajbhandari et al., 2020](https://arxiv.org/abs/1910.02054)) **Core contribution of [DeepSpeed](https://github.com/microsoft/DeepSpeed)**: Data parallelism has too much redundancy — every GPU stores the full model + optimizer states. ZeRO shards them.
+**The Fundamental Baseline**: Replicates identical model weights across all GPU devices, partitions the global batch across ranks, and executes a collective `AllReduce` to synchronize gradients prior to the optimizer update:
 
 ```
-ZeRO Stage 1: Shard optimizer states
-  → 4x memory reduction
-
-ZeRO Stage 2: Shard optimizer states + gradients
-  → 8x memory reduction
-
-ZeRO Stage 3: Shard optimizer states + gradients + model parameters
-  → Nx memory reduction (N = number of GPUs)
-  → Equivalent to FSDP
+GPU 0: Model Copy + Micro-Batch 0 ──> Gradient_0
+GPU 1: Model Copy + Micro-Batch 1 ──> Gradient_1
+GPU 2: Model Copy + Micro-Batch 2 ──> Gradient_2
+GPU 3: Model Copy + Micro-Batch 3 ──> Gradient_3
+        │
+        └──> Collective AllReduce: Average Gradients across All Ranks
+        │
+GPU 0-3: Synchronous Optimizer Step
 ```
 
-**PyTorch FSDP (Fully Sharded Data Parallel)**:
+**Capacity Barrier**: Standard DDP breaks down when model states (parameters + gradients + optimizer states + activations) exceed single-GPU VRAM capacity.
+
+### 6.2.2 Zero Redundancy Optimizer (ZeRO) & FSDP
+
+([Rajbhandari et al., 2020](https://arxiv.org/abs/1910.02054)): Foundational breakthrough of DeepSpeed. Standard data parallelism introduces severe memory redundancy because every rank replicates the entire model, gradients, and optimizer states. ZeRO eliminates this redundancy through partitioned sharding:
+
+```
+ZeRO-Stage 1 (Optimizer State Partitioning):
+  Shards FP32 AdamW states across DP ranks.
+  Memory reduction: 4x savings without added communication overhead.
+
+ZeRO-Stage 2 (Gradient + Optimizer State Partitioning):
+  Shards both optimizer states and gradients across DP ranks.
+  Memory reduction: 8x savings.
+
+ZeRO-Stage 3 (Full Parameter Sharding / PyTorch FSDP):
+  Shards model parameters, gradients, and optimizer states across all DP ranks.
+  Memory reduction: Proportional to world size N.
+  Communication: Broadcasts parameters on-the-fly via AllGather during forward pass,
+  releases them immediately, and performs ReduceScatter during backward pass.
+```
+
+**PyTorch Fully Sharded Data Parallel (FSDP)**:
 ```python
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp import ShardingStrategy, MixedPrecision
 
 model = FSDP(
     model,
-    sharding_strategy=ShardingStrategy.FULL_SHARD,  # ZeRO-3
+    sharding_strategy=ShardingStrategy.FULL_SHARD,  # ZeRO-3 equivalent
     mixed_precision=MixedPrecision(
         param_dtype=torch.bfloat16,
         reduce_dtype=torch.bfloat16,
@@ -111,274 +118,155 @@ model = FSDP(
 )
 ```
 
-**FSDP2** (latest in PyTorch):
-- Finer-grained sharding (per-parameter)
-- Better integration with tensor parallelism
-- FP8 support
-
 ### 6.2.3 Tensor Parallelism (TP)
 
-([Shoeybi et al., 2019 — Megatron-LM](https://arxiv.org/abs/1909.08053))
+([Shoeybi et al., 2019: Megatron-LM](https://arxiv.org/abs/1909.08053))
 
-**Splits individual layer matrix multiplications across multiple GPUs**:
+**Intra-Layer Tensor Sharding**: Partitions individual weight matrices across GPUs within the same node:
 
 ```
-# Linear layer Y = X @ W (W ∈ ℝ^{d×d})
-# Split W by columns across 2 GPUs:
+# Column-Parallel Linear Layer (e.g. Attention QKV projection):
+W = [W_1 | W_2]  (Split along column dimension across GPU 0 and GPU 1)
+Y_1 = X @ W_1,   Y_2 = X @ W_2
 
-GPU 0: Y_0 = X @ W_0   (W_0 = W[:, :d/2])
-GPU 1: Y_1 = X @ W_1   (W_1 = W[:, d/2:])
-
-# AllGather or ReduceScatter to combine results
+# Row-Parallel Linear Layer (e.g. Attention Output projection):
+W = [W_1]
+    [---]        (Split along row dimension across GPU 0 and GPU 1)
+    [W_2]
+Y = Y_1 @ W_1 + Y_2 @ W_2  ──> Combined via AllReduce collective
 ```
 
-**Megatron-LM style TP**:
-- Self-Attention: Q, K, V split by heads
-- FFN: First linear layer split by columns, second by rows
-- Requires 2 AllReduce operations per layer
-
-**Best suited for**: Intra-node (NVLink bandwidth is sufficient), typically TP=8 (within a single machine)
+- In Megatron-LM style Transformer blocks, Column-Parallel and Row-Parallel layers are paired consecutively, requiring only two `AllReduce` operations per Transformer layer.
+- Because `AllReduce` must execute on every single forward and backward layer step, TP is confined strictly to high-bandwidth intra-node NVLink domains ($TP \le 8$).
 
 ### 6.2.4 Pipeline Parallelism (PP)
 
 ([Narayanan et al., 2021](https://arxiv.org/abs/2104.04473))
 
-**Splits the model by layers across different machines**:
+**Inter-Layer Sequential Sharding**: Partitions the model depth-wise across multiple nodes, streaming micro-batches through a pipeline schedule:
 
 ```
-GPU 0: Layers 0-7    (Stage 0)
-GPU 1: Layers 8-15   (Stage 1)
-GPU 2: Layers 16-23  (Stage 2)
-GPU 3: Layers 24-31  (Stage 3)
-
-Data flows through the pipeline: Stage 0 → 1 → 2 → 3
+Stage 0 (GPU 0): Layers [0, 8)   ──> P2P Send Activation ──>
+Stage 1 (GPU 1): Layers [8, 16)  ──> P2P Send Activation ──>
+Stage 2 (GPU 2): Layers [16, 24) ──> P2P Send Activation ──>
+Stage 3 (GPU 3): Layers [24, 32) ──> Loss Computation
 ```
 
-**Problem**: Naive PP has significant "bubble" time (GPUs idle waiting).
+**Pipeline Scheduling and Bubble Reduction**:
+- **GPipe** ([Huang et al., 2019](https://arxiv.org/abs/1811.06965)): Accumulates all micro-batch activations before executing backward passes; suffers from high activation memory overhead and significant bubble latency ($t_{\text{bubble}} \approx \frac{p-1}{m}$).
+- **1F1B (One-Forward-One-Backward)**: Interleaves execution such that each device immediately executes one backward step after one forward step, bounding peak activation memory to the number of pipeline stages $p$.
+- **Zero-Bubble Pipeline Parallelism** ([Qi et al., 2024](https://arxiv.org/abs/2401.10241)): Decouples backward computations into gradient computation ($B$) and activation recomputation ($W$), scheduling them into pipeline voids to virtually eliminate idle bubble time.
 
-**Solutions**:
-- **GPipe** ([Huang et al., 2019](https://arxiv.org/abs/1811.06965)): Split micro-batches into smaller mini-batches to increase pipeline parallelism
-- **1F1B** (one-forward-one-backward): Alternate forward and backward scheduling to reduce bubbles
-  ```
-  Stage 0: F0 F1 F2 F3 B0 B1 B2 B3   (naive, large bubble)
-  Stage 0: F0 F1 F2 F3 B0 F4 B1 F5   (1F1B, small bubble)
-  ```
-- **Interleaved PP**: Each GPU holds non-contiguous layers (e.g., GPU 0 holds layers 0, 8, 16, 24) to reduce bubbles
-- **Zero-bubble PP** ([Qi et al., 2024](https://arxiv.org/abs/2401.10241)): Rescheduling to bring bubble time close to 0
+### 6.2.5 Context Parallelism (CP) and Sequence Parallelism (SP)
 
-### 6.2.5 Context Parallelism (CP)
+- **Megatron Sequence Parallelism (SP)**: Breaks activation memory redundancy in LayerNorm and Dropout layers across the TP group via `ReduceScatter` and `AllGather`.
+- **Context Parallelism (Ring Attention)** ([Liu et al., 2023](https://arxiv.org/abs/2310.01889)): For ultra-long sequence horizons (128K to 1M tokens), CP partitions sequence lengths across distributed devices, asynchronously circulating Key-Value blocks in a communication ring while computing local attention blocks.
 
-**Long-sequence parallelism**: Split the sequence across multiple GPUs, with each GPU processing a portion.
+### 6.2.6 Expert Parallelism (EP) for MoE
 
-```
-Sequence length 128K, 4 GPUs:
-GPU 0: tokens 0-32K
-GPU 1: tokens 32K-64K
-GPU 2: tokens 64K-96K
-GPU 3: tokens 96K-128K
+Assigns distinct expert sub-networks to different GPU ranks:
+1. **Token Dispatch (All-to-All)**: Tokens route to target expert ranks based on gate routing scores.
+2. **Local Expert Computation**: Each GPU processes its assigned tokens through its local experts.
+3. **Token Combine (All-to-All)**: Output activations are gathered back to the originating rank.
 
-Attention computed via Ring Attention:
-- Each GPU locally computes part of QK^T
-- KV is passed to the next GPU via a ring
-- Repeat until all KV have been seen
-```
+### 6.2.7 Multi-Dimensional Parallelism Compositions (3D/4D/5D)
 
-### 6.2.6 Expert Parallelism (EP)
-
-**Specific to MoE models**: Different experts are placed on different GPUs.
+Production pretraining runs orchestrate multidimensional parallelism hybrids:
 
 ```
-GPU 0: Expert 0, 1
-GPU 1: Expert 2, 3
-GPU 2: Expert 4, 5
-GPU 3: Expert 6, 7
+DeepSeek-V3 Infrastructure Layout (2,048 H800 GPUs):
+  Tensor Parallelism:   TP = 1   (Eliminated via MLA and fine-grained MoE design)
+  Pipeline Parallelism: PP = 16  (16 pipeline stages across nodes)
+  Data Parallelism:     DP = 128 (ZeRO-1 optimizer sharding)
+  Expert Parallelism:   EP = 64  (MoE expert dispatch across 64 ranks)
+  Topology Formula:     Total GPUs = 16 (PP) × 128 (DP) = 2,048
 
-Token routing:
-1. Gate computes which expert each token goes to → All-to-All
-2. Each GPU computes its own experts → All-to-All
-3. Results are sent back to the originating GPU
+LLaMA 3 (405B) Infrastructure Layout (16,384 H100 GPUs):
+  Tensor Parallelism:   TP = 8   (Intra-node NVLink mesh)
+  Pipeline Parallelism: PP = 16  (Inter-node InfiniBand fabric)
+  Data Parallelism:     DP = 128 (FSDP / ZeRO-3 data parallel ranks)
+  Context Parallelism:  CP enabled for 128K sequence phases
+  Topology Formula:     Total GPUs = 8 (TP) × 16 (PP) × 128 (DP) = 16,384
 ```
 
-**Communication bottleneck**: All-to-All communication scales with token count × hidden_size.
+## 6.3 Distributed Training Frameworks and Acceleration
 
-### 6.2.7 3D/4D/5D Parallelism Combinations
+### 6.3.1 Framework Landscape
 
-Real large-model training combines multiple parallelism strategies:
+| Framework | Sponsoring Organization | Primary Strengths | Target Scaling Realm |
+|-----------|------------------------|-------------------|----------------------|
+| [Megatron-LM](https://github.com/NVIDIA/Megatron-LM) | NVIDIA | Industrial 3D Parallelism, custom kernels | 100B-1T+ parameters |
+| [DeepSpeed](https://github.com/microsoft/DeepSpeed) | Microsoft | ZeRO-1/2/3, 3D Parallelism, MoE | 10B-1T parameters |
+| [PyTorch FSDP](https://pytorch.org/docs/stable/fsdp.html) | Meta | Native PyTorch ZeRO-3 integration | 10B-100B parameters |
+| [Colossal-AI](https://github.com/hpcaitech/ColossalAI) | HPC-AI Tech | Multi-dimensional auto-parallelism | 10B-100B parameters |
 
-```
-DeepSeek-V3 (2048 H800 GPUs):
-  TP=1 (no TP, because MLA and MoE are used)
-  PP=16 (16 pipeline stages)
-  DP=128 (128-way data parallelism)
-  EP=64 (64-way expert parallelism)
-  
-  2048 = 16 × 128 = 16 × 2 × 64
+### 6.3.2 Systems Acceleration Techniques
 
-LLaMA 3 405B (16384 H100 GPUs):
-  TP=8 (intra-node)
-  PP=16 (inter-node)
-  DP=128 (data parallelism)
-  CP for long-context training
-  
-  16384 = 8 × 16 × 128
-```
+**Selective Activation Checkpointing** ([Chen et al., 2016](https://arxiv.org/abs/1604.06174)): Discards intermediate activations during forward passes and selectively recomputes only memory-intensive operators (such as attention projections) during backward passes, cutting peak activation memory by $\approx 70\%$ at a modest $\approx 30\%$ compute cost.
 
-## 6.3 Training Frameworks
+**FlashAttention IO-Aware Tiling** ([Dao et al., 2022](https://arxiv.org/abs/2205.14135)):
+- Bypasses materialization of the full $N \times N$ attention matrix in High Bandwidth Memory (HBM).
+- Splits queries, keys, and values into sub-blocks loaded into fast on-chip SRAM, computing online softmax incremental scaling dynamically.
+- Eliminates memory reads/writes, yielding a 2x-4x wall-clock speedup and reducing memory complexity from $O(N^2)$ to $O(N)$.
 
-### 6.3.1 Framework Comparison
+**Kernel Fusion**: Fuses multiple sequential memory-bound operations into unified GPU kernels (e.g., Fused RMSNorm + RoPE, Fused SwiGLU, Fused Cross-Entropy), eliminating unnecessary round-trip global memory latency.
 
-| Framework | Company | Parallelism Strategies | Scale |
-|------|------|---------|---------|
-| [Megatron-LM](https://github.com/NVIDIA/Megatron-LM) | NVIDIA | TP+PP+DP, MoE | 100B-1T+ |
-| [DeepSpeed](https://github.com/microsoft/DeepSpeed) | Microsoft | ZeRO, PP, MoE | 10B-1T |
-| [FSDP](https://pytorch.org/docs/stable/fsdp.html) (PyTorch) | Meta | ZeRO-3 | 10B-100B |
-| [ColossalAI](https://github.com/hpcaitech/ColossalAI) | HPC-AI Tech | Multiple | 10B-100B |
-| [Levanter](https://github.com/stanford-crfm/levanter) | Stanford | JAX-based | Research |
-| [NanoGPT](https://github.com/karpathy/nanoGPT) | Karpathy | DDP | Learning/small scale |
+**Communication-Computation Overlap**: Launches asynchronous collective communications (such as `ReduceScatter` in DP/FSDP) concurrently with backward pass matrix multiplications on preceding layers.
 
-### 6.3.2 Megatron-LM Core
+## 6.4 Cluster Reliability and Operational Efficiency
+
+### 6.4.1 Resilient Checkpointing Mechanisms
 
 ```python
-# Megatron-LM 3D parallelism configuration
-# launch: torchrun --nproc_per_node=8 --nnodes=64
+# Asynchronous distributed snapshotting logic
+from torch.distributed.checkpoint import save, FileSystemWriter
 
-args = {
-    "tensor_model_parallel_size": 8,     # TP: intra-node
-    "pipeline_model_parallel_size": 16,   # PP: inter-node
-    "data_parallel_size": 32,             # DP: auto = total / TP / PP
-    "sequence_parallel": True,            # Sequence parallelism (paired with TP)
-    "use_flash_attn": True,
-    "bf16": True,
-    "micro_batch_size": 1,
-    "global_batch_size": 1024,
-}
+# Each rank writes strictly its local shard directly to NVMe storage in non-blocking threads
+storage_writer = FileSystemWriter(checkpoint_dir)
+save(
+    state_dict={"model": model.state_dict(), "optim": optimizer.state_dict()},
+    storage_writer=storage_writer,
+)
 ```
 
-### 6.3.3 Efficient Training Techniques
+### 6.4.2 Failure Mitigation in 10K-GPU Fleets
 
-**Gradient Checkpointing (Activation Recomputation)** ([Chen et al., 2016](https://arxiv.org/abs/1604.06174)):
-```
-Normal: Save all intermediate activations during forward → use in backward
-Problem: Activations consume too much memory (proportional to batch_size × seq_len × hidden × layers)
+In clusters operating at 16,000+ accelerators, Mean Time Between Failures (MTBF) drops to mere hours due to cosmic-ray memory flips, high-voltage transceiver faults, and link degradation:
+- **Fast Heartbeat Health Probes**: Real-time diagnostic monitors detecting silent GPU hangs and CUDA error states within seconds.
+- **Dynamic Node Eviction & Hot-Spare Slicing**: Automatically draining failing compute nodes, routing traffic to hot-standby nodes, and resuming training from local NVMe checkpoints within minutes.
 
-Gradient Checkpointing: Save activations only at selected layers, recompute during backward
-  → Memory reduced by √L (L = number of layers)
-  → ~33% compute overhead
+### 6.4.3 Model FLOPS Utilization (MFU)
 
-Selective checkpointing: Only checkpoint memory-heavy operations (attention)
-```
+**The Universal Metric of Distributed Engineering Health**:
 
-**Flash Attention** ([Dao et al., 2022](https://arxiv.org/abs/2205.14135)):
-```
-Standard Attention:
-  S = Q @ K^T          → O(n²d) compute, O(n²) memory
-  P = softmax(S)       → stores n² matrix
-  O = P @ V            
+$$\text{MFU} = \frac{\text{Observed Training Throughput (Tokens/sec)} \times \text{Theoretical FLOPs per Token}}{\text{Peak Hardware Cluster Theoretical Floating-Point Capacity (FLOPs/sec)}}$$
 
-Flash Attention (Tri Dao):
-  Does not materialize the n² attention matrix
-  Uses tiling + online softmax to compute in SRAM block by block
-  → O(n) memory instead of O(n²)
-  → 2-4x speedup (fewer HBM reads/writes)
-  
-  Flash Attention 2: Better parallelization
-  Flash Attention 3: H100 optimizations, FP8 support
-```
+$$\text{FLOPs per Token for Standard Decoder LLMs} \approx 6N_{\text{params}} + 12L_{\text{layers}} H_{\text{hidden}} T_{\text{seq\_len}}$$
 
-> Code: [Dao-AILab/flash-attention](https://github.com/Dao-AILab/flash-attention)
-
-**Compiled/Fused Kernels**:
-```python
-# torch.compile auto-fuses operations
-model = torch.compile(model, mode="max-autotune")
-
-# Key manually fused kernels:
-# - Fused Attention (FlashAttention)
-# - Fused LayerNorm + Dropout
-# - Fused SwiGLU
-# - Fused RoPE
-# - Fused Cross-Entropy (lm_head + CE loss)
-```
-
-**Communication-Computation Overlap**:
-```
-Without overlap:
-  Forward → AllReduce → Forward → AllReduce ...
-
-With overlap:
-  Forward_layer_N → [AllReduce_layer_{N-1} running concurrently] → ...
-  
-  Launch communication asynchronously, transmit gradients while computing
-```
-
-## 6.4 Fault Tolerance and Efficiency
-
-### 6.4.1 Checkpoint Strategy
-
-```python
-# Async checkpointing (non-blocking)
-def async_save_checkpoint(model, optimizer, step):
-    # Copy state_dict to CPU (non-blocking)
-    state = {k: v.cpu() for k, v in model.state_dict().items()}
-    # Write to storage in a background thread
-    threading.Thread(target=torch.save, args=(state, f"ckpt_{step}.pt")).start()
-
-# Distributed checkpointing (each GPU saves only its own shard)
-from torch.distributed.checkpoint import save, load
-save(model.state_dict(), storage_writer=FileSystemWriter(path))
-```
-
-### 6.4.2 Failure Recovery
-
-Failures are the norm in large cluster training:
-- With 16K GPU training, hardware failure occurs on average every 2-3 hours
-- GPU memory errors, network jitter, node crashes
-
-**DeepSeek-V3's approach**:
-- Fast checkpoint to local NVMe (ramdisk) every 10 minutes
-- On failure, recover from the most recent fast checkpoint
-- Failed nodes are automatically replaced by spare nodes
-- Only ~10 minutes of training progress is lost
-
-### 6.4.3 MFU (Model FLOPS Utilization)
-
-**The key metric for training efficiency**:
-```
-MFU = Actual computation / (Theoretical peak FLOPS × Training time)
-
-Good MFU:
-  Single node: 50-60%
-  Small cluster (64-256 GPUs): 40-50%
-  Large cluster (1K+ GPUs): 30-45%
-  Very large cluster (16K GPUs): 35-40% (LLaMA 3 reported 38-43%)
-```
-
-**Factors affecting MFU**:
-- Communication overhead (parallelism strategy choices)
-- Bubble ratio (PP scheduling)
-- Data loading latency
-- Kernel efficiency
-- Recomputation overhead from gradient checkpointing
+**Production MFU Baselines**:
+- Single-Node Execution: 55-65% MFU.
+- Mid-Scale Cluster (64-256 GPUs): 45-55% MFU.
+- Frontier 10K-GPU Cluster: 35-43% MFU (Meta LLaMA 3 reported 38-43% on 16K H100s).
 
 ## Key Papers
 
-- [Rajbhandari et al. (2019) — ZeRO](https://arxiv.org/abs/1910.02054) — memory optimization under data parallelism (the heart of DeepSpeed)
-- [Shoeybi et al. (2019) — Megatron-LM](https://arxiv.org/abs/1909.08053) — Tensor Parallelism for transformers
-- [Huang et al. (2018) — GPipe](https://arxiv.org/abs/1811.06965) — the classic Pipeline Parallelism paper
-- [Dao et al. (2022) — FlashAttention](https://arxiv.org/abs/2205.14135) — IO-aware attention, 2–4× speedup
-- [Dao (2023) — FlashAttention-2](https://arxiv.org/abs/2307.08691) — further parallelism optimizations
+- [Rajbhandari et al. (2020): ZeRO: Memory Optimizations Toward Training Trillion Parameter Models](https://arxiv.org/abs/1910.02054): Foundational zero-redundancy memory sharding paper.
+- [Shoeybi et al. (2019): Megatron-LM: Training Multi-Billion Parameter Language Models Using Model Parallelism](https://arxiv.org/abs/1909.08053): Foundational Tensor Parallelism framework.
+- [Narayanan et al. (2021): Efficient Large-Scale Language Model Training on GPU Clusters Using Megatron-LM](https://arxiv.org/abs/2104.04473): Milestone 3D parallelism synthesis.
+- [Dao et al. (2022): FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness](https://arxiv.org/abs/2205.14135): Foundational IO-aware attention paper.
+- [Qi et al. (2024): Zero Bubble Pipeline Parallelism](https://arxiv.org/abs/2401.10241): Frontier bubble-free pipeline scheduling.
 
 ## Further Reading
 
-- [Megatron-LM repo](https://github.com/NVIDIA/Megatron-LM) — reference 3D-parallel implementation
-- [DeepSpeed docs](https://www.deepspeed.ai/) — ZeRO-1/2/3 configuration
-- [How to Train Really Large Models](https://lilianweng.github.io/posts/2021-09-25-train-large/) — Lilian Weng
+- NVIDIA: [Megatron-LM Official Repository](https://github.com/NVIDIA/Megatron-LM) (Reference implementation for distributed 3D parallelism).
+- DeepSpeed: [DeepSpeed Documentation & Tutorials](https://www.deepspeed.ai/) (Complete ZeRO-1/2/3 configuration guides).
+- Lilian Weng: [How to Train Really Large Models](https://lilianweng.github.io/posts/2021-09-25-train-large/) (Comprehensive architectural survey of distributed methods).
 
 ## Exercises
 
-1. **Memory budget**: estimate GPU count needed to train a 70B model (FP16, AdamW, batch=1M tokens) under ZeRO-1, 2, and 3.
-2. **Profile training**: use PyTorch profiler on one nanoGPT step; identify the slowest op and compare before/after FlashAttention.
-3. **3D-parallel tradeoff**: with 64 H100s for a 70B model, choose a reasonable (DP, TP, PP) configuration and explain why TP shouldn't cross nodes.
+1. **Distributed Memory Estimation**: Calculate the exact VRAM footprint (parameters, master weights, gradients, optimizer states) required to train a 70B parameter model in BF16 precision under ZeRO-1, ZeRO-2, and ZeRO-3 across 64 GPUs.
+2. **PyTorch Profiler & FlashAttention Benchmark**: Profile a forward-backward pass of a causal Transformer block with and without FlashAttention-2; inspect kernel timelines and memory bandwidth saturation.
+3. **3D Parallelism Topology Design**: Given a cluster of 64 NVIDIA H100 SXM GPUs (8 nodes with NVLink within nodes, 400 Gbps InfiniBand across nodes), design the optimal $(TP, PP, DP)$ configuration for pretraining a 70B model and justify your architectural decisions.
 
 ---
 

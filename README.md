@@ -1,8 +1,8 @@
 # LLM 训练工程师完全指南
 
-> 从 Tokenizer 到 Post-Training，从单卡到万卡集群，从纯文本到多模态。
+> 从分词表征到后训练对齐，从单卡微调到万卡集群调度，从纯文本理解到多模态统一基座。
 
-面向想系统掌握 LLM 全栈训练能力的工程师。覆盖理论、工程、SOTA 和实战。
+系统性拆解大语言模型全栈训练技术体系，贯通底层数学物理机理、核心算法推演、工业级分布式工程与前沿 SOTA 实践。
 
 **[English Version](en/README.md)** | **在线阅读**：[yingwang.github.io/llm-tutorial](https://yingwang.github.io/llm-tutorial/)
 
@@ -124,27 +124,27 @@ flowchart TB
 | 405B | 16384x H100 | 15T | ~$50M+ | ~2月 |
 | 671B MoE | 2048x H800 | 14.8T | ~$5.5M | ~2月 |
 
-> 最后一行是 DeepSeek-V3，MoE 架构大幅降低了成本。
+> 注：表中 DeepSeek-V3 凭借细粒度 MoE 稀疏激活与 FP8 混合精度训练，实现了计算效率与显存开销的跨越式压缩。
 
 ## 配套代码
 
-可运行示例放在独立仓库 **[llm-tutorial-code](https://github.com/yingwang/llm-tutorial-code)**：每章一个目录，从 BPE / Attention 起点，逐步覆盖 pretrain / SFT / DPO / LoRA / 推理服务等。
+本教程配套的可运行工程代码存放于独立仓库 **[llm-tutorial-code](https://github.com/yingwang/llm-tutorial-code)**。仓库按章节模块化组织，从手写 BPE 分词器与基础注意力算子起步，逐层递进至大规模预训练流水线、SFT、DPO 对齐、LoRA 微调及高性能推理部署。
 
 ## 术语表
 
-不熟悉某个缩写？查 **[术语表](chapters/00-glossary.md)** — 涵盖架构、训练、PEFT、Infra、推理、RAG、多模态等 80+ 词条。
+若在阅读过程中遇到专业缩写或前沿概念，可随时查阅 **[术语表](chapters/00-glossary.md)**。该表系统归纳了模型架构、训练机制、参数高效微调、分布式基础设施、推理加速、检索增强生成（RAG）以及多模态等维度的 80 余个核心技术词条。
 
-## 快速开始
+## 推荐阅读路径
 
-如果你完全是新手，按这个顺序读：
+针对初学者，建议遵循由浅入深、理论与代码共振的研读顺序：
 
-1. [第一章 Tokenizer](chapters/01-tokenizer.md) — 理解输入
-2. [第二章 架构](chapters/02-architecture.md) — 理解模型
-3. [第十三章 路线图](chapters/13-roadmap.md) — 知道学什么、用什么工具
-4. 动手：跑 [nanoGPT](https://github.com/karpathy/nanoGPT)
-5. 再回来读剩下的章节
+1. [第一章 Tokenizer](chapters/01-tokenizer.md)：剖析离散符号到连续向量的离散化表征入口
+2. [第二章 架构](chapters/02-architecture.md)：洞悉 Transformer 骨干网络、位置编码与前沿注意力演进
+3. [第十三章 路线图](chapters/13-roadmap.md)：把握大模型工程师的全局技能图谱与软硬件工具链
+4. 动手实践：复现并运行 [nanoGPT](https://github.com/karpathy/nanoGPT)
+5. 进阶深造：系统研读预训练、后训练、分布式系统与推理优化等核心专题
 
-如果你有基础，直接跳到感兴趣的章节。
+具备相关背景的研发人员，亦可结合工程实际需求按模块选读。
 
 ## 关键链接
 
@@ -164,7 +164,7 @@ Ying Wang
 
 ## 引用
 
-如果本教程对你有帮助，欢迎引用：
+若本教程对你的研究或工程实践有所启发，欢迎援引：
 
 ```bibtex
 @misc{wang2026llmtutorial,
@@ -179,10 +179,10 @@ Ying Wang
 
 本仓库采用**双重许可**：
 
-- **正文与示意图**（包括 Mermaid 流程图、解释性文字、章节内容）：[CC BY-NC-SA 4.0](LICENSE) — 署名 · 非商业 · 相同方式共享
-- **代码片段**（章节中的 Python/Bash 等示例）：[MIT](LICENSE-CODE) — 自由使用，含商业用途，仅需保留版权声明
+- **正文与示意图**（包括 Mermaid 流程图、解释性文字、章节内容）：[CC BY-NC-SA 4.0](LICENSE)（署名 · 非商业 · 相同方式共享）
+- **代码片段**（章节中的 Python/Bash 等示例）：[MIT](LICENSE-CODE)（自由使用，含商业用途，仅需保留版权声明）
 
-复制本仓库的代码示例用于学习或工程实践无需考虑非商业限制。
+在学习或工程实践中复用本仓库的代码示例，不受非商业性条款限制。
 
 ---
 

@@ -4,104 +4,98 @@
 
 # 第六章：训练基础设施 (Infra)
 
-## 6.1 硬件
+超大规模语言模型的预训练与微调已演进为顶尖的高性能计算与分布式系统工程。从千卡互联拓扑、张量与流水线切分，到底层通信算子重叠与容错调度，系统级基础设施直接决定了模型训练的可扩展性上限与算力利用效率。
 
-### 6.1.1 GPU 选型
+## 6.1 硬件与集群网络拓扑
 
-| GPU | 显存 | BF16 TFLOPS | FP8 TFLOPS | 互连 | 用途 |
-|-----|------|-------------|------------|------|------|
-| A100 80GB | 80GB HBM2e | 312 | - | NVLink 600GB/s | 主流训练 (2022-2024) |
-| H100 SXM | 80GB HBM3 | 989 | 1979 | NVLink 900GB/s | 当前主力 |
-| H200 | 141GB HBM3e | 989 | 1979 | NVLink 900GB/s | 大模型 (更大显存) |
-| B200 | 192GB HBM3e | 2250 | 4500 | NVLink 1800GB/s | 下一代主力 |
-| MI300X (AMD) | 192GB HBM3 | 1307 | 2614 | Infinity Fabric | AMD 替代方案 |
+### 6.1.1 计算芯片选型与关键物理指标
 
-**关键指标**:
-- **显存容量**: 决定能放多大的模型
-- **显存带宽**: 决定推理速度（推理是 memory-bound）
-- **算力 (TFLOPS)**: 决定训练速度（训练是 compute-bound）
-- **互连带宽**: 决定多卡并行效率
+| 计算卡型号 | 显存规格与类型 | BF16 算力 (TFLOPS) | FP8 算力 (TFLOPS) | 互联拓扑与带宽 | 典型应用定位 |
+|-----------|--------------|-------------------|-------------------|---------------|-------------|
+| NVIDIA A100 | 80GB HBM2e | 312 | - | NVLink 3.0 (600 GB/s) | 经典基座预训练与微调主力 |
+| NVIDIA H100 | 80GB HBM3 | 989 | 1979 | NVLink 4.0 (900 GB/s) | 现代大模型千卡/万卡预训练标准配置 |
+| NVIDIA H200 | 141GB HBM3e | 989 | 1979 | NVLink 4.0 (900 GB/s) | 超长序列与超大 MoE 显存密集型场景 |
+| NVIDIA B200 | 192GB HBM3e | 2250 | 4500 | NVLink 5.0 (1800 GB/s) | 下一代万亿参数混合架构 |
+| AMD MI300X | 192GB HBM3 | 1307 | 2614 | Infinity Fabric (896 GB/s) | 高显存容量开源替代路线 |
 
-### 6.1.2 集群网络
+**核心性能瓶颈分析**：
+- **显存容量（Memory Capacity）**：硬性约束单卡承载的模型参数、优化器状态与中间激活峰值；
+- **显存带宽（Memory Bandwidth）**：决定自回归解码等访存受限（Memory-bound）算子的吞吐上限；
+- **张量算力（Compute TFLOPS）**：决定高维 GEMM 矩阵乘法等计算受限（Compute-bound）环节的耗时；
+- **跨卡互联带宽（Interconnect Bandwidth）**：制约多维分布式并行时的通信同步延迟与集群扩展效率。
+
+### 6.1.2 层次化网络互联体系
 
 ```
-单机内:
-  GPU ←NVLink 900GB/s→ GPU    (8卡全连接)
+节点机内互联 (Intra-Node):
+  GPU 0 ←── NVLink (900 GB/s 双向) ──→ GPU 1..7 (8 卡全连接 Mesh 拓扑)
 
-跨机:
-  Node ←InfiniBand 400Gb/s→ Node
+跨节点网络互联 (Inter-Node):
+  Node 0 ←── InfiniBand NDR 400Gb/s (约 50 GB/s) ──→ Node 1
   
-  400Gb IB ≈ 50GB/s (每个方向)
-  NVLink ≈ 900GB/s
-  
-  所以跨机通信比机内慢 ~18倍！
-  → 并行策略必须最小化跨机通信
+物理带宽鸿沟:
+  机内 NVLink 带宽约为跨机 InfiniBand 带宽的 18 倍。
+  这一物理约束奠定了分布式切分的基本原则：将通信高密度的张量切分收敛于节点机内，跨节点仅执行通信量较小的流水线或数据并行。
 ```
 
-**大集群拓扑** (如 16K GPU):
-```
-GPU (8) → Node → Leaf switch (32 nodes) → Spine switch → Fat-tree/Dragonfly
-```
+**大规模万卡集群网络拓扑**：
+- 采用无阻塞胖树（Fat-Tree）或蜻蜓（Dragonfly+）网络拓扑；
+- 依赖 NCCL 集合通信库结合网络拓扑感知进行通道编排（Channel Search）；
+- 引入 RoCEv2 或 InfiniBand 自适应路由（Adaptive Routing）与硬件遥测拥塞控制，规避网络丢包与长尾拖慢。
 
-**网络问题**: 训练大模型时，一个慢节点或丢包就会拖慢整个训练。需要：
-- [NCCL](https://github.com/NVIDIA/nccl) 调优
-- 网络拓扑感知的进程放置
-- 容错机制（自动检测并替换故障节点）
-
-### 6.1.3 存储
+### 6.1.3 高性能存储与 Checkpoint 流水线
 
 ```
-训练数据读取:
-  → 分布式文件系统 (Lustre, GPFS, WekaFS)
-  → 或对象存储 (S3) + 本地 NVMe 缓存
+训练数据读取流水线:
+  大规模异构清洗语料 → 分布式并行文件系统 (Lustre, GPFS, WekaFS) / 对象存储 (S3)
+  → 本地高速 NVMe SSD 内存映射缓存 (Mmap I/O)
 
-Checkpoint 写入:
-  → 70B 模型一个 checkpoint ~500GB
-  → 每 1000 步存一次 → 每天几十TB
-  → 异步 checkpoint (不阻塞训练)
-  → Nebula/分布式 checkpoint 存储
+Checkpoint 检查点写入:
+  70B 级别模型单个全量 Checkpoint 达数百 GB
+  → 采用异步持久化机制：前向主进程仅将权重快照非阻塞复制至 Host 内存，后台守护线程异步写入分布式存储；
+  → 采用分布式分片写入（Distributed Checkpointing），各 GPU 仅持久化本地分片，避免单点 I/O 汇聚阻塞。
 ```
 
-## 6.2 分布式训练策略
+## 6.2 分布式训练并行策略
 
 ### 6.2.1 数据并行 (Data Parallelism, DP)
 
-**最简单的并行方式**: 每张卡存完整模型副本，不同卡处理不同数据。
+**经典数据并行**：每个计算节点维护一份完整的模型参数与优化器状态副本，各节点并行吞吐异构的数据微批次，并在反向传播完成后通过集合通信原语（AllReduce）同步梯度均值。
 
 ```
-GPU 0: Model copy + Data batch 0 → gradient_0
-GPU 1: Model copy + Data batch 1 → gradient_1
-GPU 2: Model copy + Data batch 2 → gradient_2
-GPU 3: Model copy + Data batch 3 → gradient_3
-          ↓ AllReduce: average gradients ↓
-GPU 0-3: 用平均梯度更新模型
+GPU 0: 持有全量模型 + 数据微批次 0 → 计算梯度 g_0
+GPU 1: 持有全量模型 + 数据微批次 1 → 计算梯度 g_1
+GPU 2: 持有全量模型 + 数据微批次 2 → 计算梯度 g_2
+GPU 3: 持有全量模型 + 数据微批次 3 → 计算梯度 g_3
+       ↓ 集合通信 AllReduce: 计算全局平均梯度 g_avg = Σ(g_i) / 4 ↓
+各 GPU 基于 g_avg 独立执行优化器步进更新
 ```
 
-**限制**: 每张卡要放整个模型。7B 模型 (BF16) = 14GB 参数 + 优化器状态 ~56GB → 一张 80GB 卡勉强放下。70B 模型放不下。
+**显存瓶颈**：随着模型参数增长，单卡无法容纳模型本身与优化器状态（以 BF16 训练 70B 模型为例，参数需 140GB，AdamW 优化器状态需 840GB，远超单卡显存）。
 
-### 6.2.2 ZeRO (Zero Redundancy Optimizer)
+### 6.2.2 零冗余优化器 (ZeRO) 与 FSDP
 
-([Rajbhandari et al., 2020](https://arxiv.org/abs/1910.02054)) **[DeepSpeed](https://github.com/microsoft/DeepSpeed) 的核心贡献**: 数据并行中的冗余太多——每张卡都存完整模型 + 优化器状态。ZeRO 把它们切分。
+([Rajbhandari et al., 2020](https://arxiv.org/abs/1910.02054)) **[DeepSpeed](https://github.com/microsoft/DeepSpeed) 的核心洞见**：经典数据并行存在极高的显存冗余，每个计算节点均重复持有全量模型参数、梯度与优化器状态。ZeRO（Zero Redundancy Optimizer）通过在数据并行维度渐进式切分状态张量，打破单卡显存墙：
 
 ```
-ZeRO Stage 1: 切分优化器状态
-  → 内存减少 4倍
+ZeRO-Stage 1 (优化器状态切分):
+  将 FP32 优化器状态 (一阶动量、二阶矩、Master Weights) 均匀分片至各卡，显存占用降低至原来的 1/4，通信开销保持不变。
 
-ZeRO Stage 2: 切分优化器状态 + 梯度
-  → 内存减少 8倍
+ZeRO-Stage 2 (优化器状态 + 梯度切分):
+  各卡仅保留本地分片参数对应的梯度张量，反向传播时采用 Reduce-Scatter 同步，显存占用降低至原来的 1/8。
 
-ZeRO Stage 3: 切分优化器状态 + 梯度 + 模型参数
-  → 内存减少 N倍 (N = GPU数)
-  → 相当于 FSDP
+ZeRO-Stage 3 (完全参数分片 / FSDP):
+  模型参数亦按卡分片存储。在前向计算某一层时通过 All-Gather 动态拉取全量权重，计算完毕立即释放；反向传播重复此动态收集与释放过程。
 ```
 
-**PyTorch FSDP (Fully Sharded Data Parallel)**:
+**PyTorch 原生完全分片数据并行 (FSDP)**：
 ```python
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp import ShardingStrategy, MixedPrecision
 
 model = FSDP(
     model,
-    sharding_strategy=ShardingStrategy.FULL_SHARD,  # ZeRO-3
+    sharding_strategy=ShardingStrategy.FULL_SHARD,  # 对应 ZeRO-3 级别的完全分片
     mixed_precision=MixedPrecision(
         param_dtype=torch.bfloat16,
         reduce_dtype=torch.bfloat16,
@@ -111,274 +105,147 @@ model = FSDP(
 )
 ```
 
-**FSDP2** (PyTorch 最新):
-- 更细粒度的 sharding (per-parameter)
-- 更好地配合 tensor parallel
-- 支持 FP8
+**FSDP2 现代化升级**：在 PyTorch 2.x 中引入逐参数（Per-parameter）细粒度分片，显著优化与张量并行的组合兼容性，原生支持 FP8 高性能混合精度。
 
 ### 6.2.3 张量并行 (Tensor Parallelism, TP)
 
 ([Shoeybi et al., 2019 — Megatron-LM](https://arxiv.org/abs/1909.08053))
 
-**把单个层的矩阵乘法切分到多张卡上**:
+**算子内权重矩阵切分**：将单个线性层或注意力矩阵切分到节点内的多张 GPU 并行计算：
 
 ```
-# 线性层 Y = X @ W (W ∈ ℝ^{d×d})
-# 把 W 按列切分到 2 张卡:
+以前馈网络两层 MLP 为例: Y = GELU(X @ W_1) @ W_2
+将 W_1 按列切分 (Column Parallel): W_1 = [W_11, W_12]
+将 W_2 按行切分 (Row Parallel):    W_2 = [W_21; W_22]
 
-GPU 0: Y_0 = X @ W_0   (W_0 = W[:, :d/2])
-GPU 1: Y_1 = X @ W_1   (W_1 = W[:, d/2:])
-
-# AllGather 或 ReduceScatter 合并结果
+计算路径:
+  1. GPU 0 计算: H_0 = GELU(X @ W_11)
+     GPU 1 计算: H_1 = GELU(X @ W_12)  (无需跨卡通信)
+  2. GPU 0 计算局部投影: Y_0 = H_0 @ W_21
+     GPU 1 计算局部投影: Y_1 = H_1 @ W_22
+  3. 执行 AllReduce: Y = Y_0 + Y_1 (完成单层前向合并)
 ```
 
-**Megatron-LM 风格 TP**:
-- Self-Attention: Q, K, V 按 head 切分
-- FFN: 第一个线性层按列切，第二个按行切
-- 每层需要 2 次 AllReduce
-
-**适用场景**: 机内（NVLink 带宽足够），通常 TP=8（一台机器内）
+- **注意力层切分**：$W_Q, W_K, W_V$ 沿 Head 维度按列切分，$W_O$ 沿 Head 维度按行切分；
+- **通信约束**：每个 Transformer 模块需在 Attention 和 FFN 各执行一次 AllReduce（前向 2 次，反向 2 次），通信频次极高，通常严格限制在单机 8 卡 NVLink 高速域内运行。
 
 ### 6.2.4 流水线并行 (Pipeline Parallelism, PP)
 
 ([Narayanan et al., 2021](https://arxiv.org/abs/2104.04473))
 
-**把模型按层切分到不同机器**:
+**层间纵向切分**：将模型的不同层序列分发至不同节点，数据按微批次（Micro-batch）在网络层间流水传递。
 
 ```
-GPU 0: Layers 0-7    (Stage 0)
-GPU 1: Layers 8-15   (Stage 1)
-GPU 2: Layers 16-23  (Stage 2)
-GPU 3: Layers 24-31  (Stage 3)
-
-数据从 Stage 0 → 1 → 2 → 3 流水线式处理
+Stage 0 (GPU 0): 执行第 0–7 层
+Stage 1 (GPU 1): 执行第 8–15 层
+Stage 2 (GPU 2): 执行第 16–23 层
+Stage 3 (GPU 3): 执行第 24–31 层
 ```
 
-**问题**: 朴素 PP 有大量"bubble"（GPU 空闲等待）。
+**流水线气泡（Bubble）消除机制**：
+- **GPipe 调度** ([Huang et al., 2019](https://arxiv.org/abs/1811.06965))：将全局批次拆解为 $m$ 个微批次，但反向传播集中在末尾，气泡率相对较高；
+- **1F1B 调度 (One-Forward-One-Backward)**：在稳定阶段前向与反向交替推进，及时释放浅层激活显存，将显存占用与批次深度解耦；
+- **交错式 1F1B (Interleaved 1F1B)**：每张 GPU 持有多个非连续的虚构阶段（Virtual Stages，如 GPU 0 持有 Layer 0–3 与 Layer 16–19），进一步将气泡率压缩至数分之一；
+- **零气泡流水线 (Zero-Bubble PP)** ([Qi et al., 2024](https://arxiv.org/abs/2401.10241))：将反向传播解耦为计算输入的梯度与计算权重的梯度，通过动态填补实现极低气泡率。
 
-**解决方案**:
-- **GPipe** ([Huang et al., 2019](https://arxiv.org/abs/1811.06965)): 把 micro-batch 切成更小的 mini-batch，增加流水线并行度
-- **1F1B** (one-forward-one-backward): 前向和反向交替调度，减少 bubble
-  ```
-  Stage 0: F0 F1 F2 F3 B0 B1 B2 B3   (朴素, 大bubble)
-  Stage 0: F0 F1 F2 F3 B0 F4 B1 F5   (1F1B, 小bubble)
-  ```
-- **Interleaved PP**: 每张卡放非连续的层（如 GPU 0 放 layer 0,8,16,24），减少 bubble
-- **Zero-bubble PP** ([Qi et al., 2024](https://arxiv.org/abs/2401.10241)): 通过重新调度把 bubble 降到接近 0
+### 6.2.5 序列并行与上下文并行 (Context Parallelism, CP)
 
-### 6.2.5 Context Parallelism (CP)
+针对超长上下文场景，当单序列前向激活超出单卡显存时，将 Token 序列切分至多张 GPU：
+- **Megatron 序列并行 (Sequence Parallelism)**：在 TP 内部将 LayerNorm 和 Dropout 沿序列维度切分，消除 TP 中的激活冗余；
+- **环形上下文并行 (Ring Attention)**：利用 GPU 环形网络流动传递 Key/Value 分块，实现近乎无限长序列的线性扩展。
 
-**长序列并行**: 把序列切分到多张卡，每张卡处理一部分序列。
+### 6.2.6 专家并行 (Expert Parallelism, EP)
 
-```
-序列长度 128K, 4张卡:
-GPU 0: tokens 0-32K
-GPU 1: tokens 32K-64K
-GPU 2: tokens 64K-96K
-GPU 3: tokens 96K-128K
+针对 MoE 架构的特化并行范式：将不同的专家模块部署于独立的 GPU 设备：
+- **Token 动态路由**：门控网络计算 Token 与专家的匹配概率后，通过全对全通信（All-to-All Dispatch）将 Token 张量路由至对应专家卡；
+- **局部前向与聚合**：各专家卡完成计算后，再次执行 All-to-All Combine 将特征张量汇总回原始设备。
 
-Attention 通过 Ring Attention 计算:
-- 每张卡本地计算 QK^T 的一部分
-- KV 通过 ring 传递到下一张卡
-- 重复直到所有 KV 都遍历过
-```
+### 6.2.7 多维混合并行设计实战
 
-### 6.2.6 Expert Parallelism (EP)
-
-**MoE 模型专用**: 不同 expert 放在不同 GPU 上。
+在万卡级工程中，需结合硬件拓扑对多种并行策略进行多维正交组合：
 
 ```
-GPU 0: Expert 0, 1
-GPU 1: Expert 2, 3
-GPU 2: Expert 4, 5
-GPU 3: Expert 6, 7
+DeepSeek-V3 预训练并行架构 (2048 块 H800 GPU 集群):
+  - TP = 1: 摒弃跨卡张量并行，规避密集的 AllReduce 通信；
+  - PP = 16: 跨节点配置 16 级流水线；
+  - DP = 128: 结合 ZeRO-1 进行数据并行；
+  - EP = 64: 跨 64 张卡配置细粒度专家并行；
+  - 核心优势: 将核心计算收敛为高吞吐 GEMM，通信主要由双向重叠的 All-to-All 承担。
 
-Token routing:
-1. Gate 计算每个 token 要去哪个 expert → All-to-All
-2. 每张卡计算自己的 expert → All-to-All
-3. 结果送回原来的卡
+LLaMA 3 405B 预训练并行架构 (16384 块 H100 GPU 集群):
+  - TP = 8: 严格限制于机内 8 卡 NVLink 域；
+  - PP = 16: 跨机柜构建 16 阶段流水线；
+  - DP = 128: 全局数据并行；
+  - CP: 依据序列长度动态接入上下文并行；
+  - 总并行维度: 8 (TP) × 16 (PP) × 128 (DP) = 16,384 GPU。
 ```
 
-**通信瓶颈**: All-to-All 通信量和 token 数 × hidden_size 成正比。
+## 6.3 训练框架与高效算子加速
 
-### 6.2.7 3D/4D/5D 并行组合
+### 6.3.1 主流分布式训练框架生态
 
-实际大模型训练组合多种并行:
+| 框架名称 | 主导机构 | 核心技术特色 | 适用场景 |
+|---------|---------|------------|---------|
+| [Megatron-LM](https://github.com/NVIDIA/Megatron-LM) | NVIDIA | 极致优化的 3D/4D 混合并行与底层 CUDA 算子 | 百亿至万亿级参数超大集群预训练 |
+| [DeepSpeed](https://github.com/microsoft/DeepSpeed) | Microsoft | 完备的 ZeRO-1/2/3 体系、Offload 与 MoE 支持 | 十亿至千亿级模型预训练与微调 |
+| [FSDP](https://pytorch.org/docs/stable/fsdp.html) | Meta / PyTorch | 原生深度集成、轻量简洁的完全分片数据并行 | 中大规模集群与标准化工业训练 |
+| [Colossal-AI](https://github.com/hpcaitech/ColossalAI) | HPC-AI Tech | 多维异构并行与多任务编排优化 | 通用分布式加速与混合部署 |
+| [NanoGPT](https://github.com/karpathy/nanoGPT) | Karpathy | 极简原生 DDP 实现，结构清晰直观 | 教学演练与微型模型算法验证 |
 
-```
-DeepSeek-V3 (2048 H800 GPUs):
-  TP=1 (不用TP，因为用了MLA和MoE)
-  PP=16 (16个pipeline stage)
-  DP=128 (128路数据并行)
-  EP=64 (64路expert并行)
-  
-  2048 = 16 × 128 = 16 × 2 × 64
+### 6.3.2 显存与计算加速核心技巧
 
-LLaMA 3 405B (16384 H100 GPUs):
-  TP=8 (机内)
-  PP=16 (跨机)
-  DP=128 (数据并行)
-  CP 用于长上下文训练
-  
-  16384 = 8 × 16 × 128
-```
+**激活值重计算 (Gradient Checkpointing)** ([Chen et al., 2016](https://arxiv.org/abs/1604.06174))：
+- 前向传播阶段丢弃大部分中间层的激活值张量，仅保留关键边界节点；
+- 反向传播时根据需要动态局部重新计算前向激活；
+- 以约 30%–33% 的额外计算开销为代价，将激活显存从 $\mathcal{O}(L)$ 降低至 $\mathcal{O}(\sqrt{L})$。
 
-## 6.3 训练框架
+**闪速注意力 (FlashAttention)** ([Dao et al., 2022](https://arxiv.org/abs/2205.14135))：
+- **IO 感知计算**：传统注意力需将 $N \times N$ 的中间注意力矩阵物化写入高延迟的 HBM 显存；
+- FlashAttention 通过分块分治（Tiling）结合在线 Softmax（Online Softmax）算法，在片上高速 SRAM 中一次性完成注意力计算并直接写出结果；
+- 显存复杂度降低至 $\mathcal{O}(N)$，端到端吞吐加速 2–4 倍。
 
-### 6.3.1 框架对比
+**通信与计算异步重叠 (Overlap)**：
+- 在反向传播中，某层的梯度一旦计算完毕，即刻异步触发跨卡 AllReduce / ReduceScatter 通信；
+- 在通信进行的同时，GPU 继续执行前序层的反向计算，实现通信开销的近乎完全隐藏。
 
-| 框架 | 公司 | 并行策略 | 适用规模 |
-|------|------|---------|---------|
-| [Megatron-LM](https://github.com/NVIDIA/Megatron-LM) | NVIDIA | TP+PP+DP, MoE | 百B-万B |
-| [DeepSpeed](https://github.com/microsoft/DeepSpeed) | Microsoft | ZeRO, PP, MoE | 十B-千B |
-| [FSDP](https://pytorch.org/docs/stable/fsdp.html) (PyTorch) | Meta | ZeRO-3 | 十B-百B |
-| [ColossalAI](https://github.com/hpcaitech/ColossalAI) | HPC-AI Tech | 多种 | 十B-百B |
-| [Levanter](https://github.com/stanford-crfm/levanter) | Stanford | JAX-based | 研究 |
-| [NanoGPT](https://github.com/karpathy/nanoGPT) | Karpathy | DDP | 学习/小规模 |
+## 6.4 容错机制与硬件利用率评估
 
-### 6.3.2 Megatron-LM 核心
+### 6.4.1 万卡集群容错体系
 
-```python
-# Megatron-LM 的 3D 并行配置
-# launch: torchrun --nproc_per_node=8 --nnodes=64
+在大规模集群训练中，硬件故障是确定性常态事件：
+- 万卡规模下，平均每数小时即可能发生 GPU 显存单比特翻转（ECC Error）、光纤网卡丢包或节点掉线；
+- **秒级故障诊断与热迁移**：实时监控网络拓扑与心跳，自动隔离故障节点并利用温备节点快速顶替；
+- **分级快速 Checkpoint**：将中间状态以 5–10 分钟为周期高频写入本地 NVMe Ramdisk，一旦发生中断可在数分钟内无缝回退恢复。
 
-args = {
-    "tensor_model_parallel_size": 8,     # TP: 机内
-    "pipeline_model_parallel_size": 16,   # PP: 跨机
-    "data_parallel_size": 32,             # DP: auto = total / TP / PP
-    "sequence_parallel": True,            # 序列并行 (和 TP 搭配)
-    "use_flash_attn": True,
-    "bf16": True,
-    "micro_batch_size": 1,
-    "global_batch_size": 1024,
-}
-```
+### 6.4.2 模型算力利用率 (MFU)
 
-### 6.3.3 高效训练技巧
+**衡量分布式训练效率的黄金指标**：
+$$\text{MFU} = \frac{\text{每次迭代实际完成的理论浮点计算量 (FLOPs)}}{\text{集群 GPU 理论峰值算力} \times \text{单步实际耗时}}$$
 
-**Gradient Checkpointing (Activation Recomputation)** ([Chen et al., 2016](https://arxiv.org/abs/1604.06174)):
-```
-正常: 前向保存所有中间激活 → 反向使用
-问题: 激活占内存太多 (正比于 batch_size × seq_len × hidden × layers)
-
-Gradient Checkpointing: 只保存部分层的激活，反向时重算
-  → 内存减少 √L 倍 (L = 层数)
-  → 计算增加 ~33%
-
-选择性 checkpointing: 只 checkpoint 占内存大的操作 (attention)
-```
-
-**Flash Attention** ([Dao et al., 2022](https://arxiv.org/abs/2205.14135)):
-```
-标准 Attention:
-  S = Q @ K^T          → O(n²d) compute, O(n²) memory
-  P = softmax(S)       → 存 n² 矩阵
-  O = P @ V            
-
-Flash Attention (Tri Dao):
-  不 materialize n² attention matrix
-  用 tiling + online softmax 在 SRAM 中分块计算
-  → 内存 O(n) 而非 O(n²)
-  → 速度快 2-4x (减少 HBM 读写)
-  
-  Flash Attention 2: 更好的并行化
-  Flash Attention 3: H100 优化, FP8 支持
-```
-
-> 代码: [Dao-AILab/flash-attention](https://github.com/Dao-AILab/flash-attention)
-
-**Compiled/Fused Kernels**:
-```python
-# torch.compile 自动 fuse 操作
-model = torch.compile(model, mode="max-autotune")
-
-# 手动 fuse 的关键 kernel:
-# - Fused Attention (FlashAttention)
-# - Fused LayerNorm + Dropout
-# - Fused SwiGLU
-# - Fused RoPE
-# - Fused Cross-Entropy (lm_head + CE loss)
-```
-
-**Communication-Computation Overlap**:
-```
-不 overlap:
-  Forward → AllReduce → Forward → AllReduce ...
-
-Overlap:
-  Forward_layer_N → [AllReduce_layer_{N-1} 同时进行] → ...
-  
-  异步启动通信，计算的同时传输梯度
-```
-
-## 6.4 容错与效率
-
-### 6.4.1 Checkpoint 策略
-
-```python
-# 异步 checkpoint (不阻塞训练)
-def async_save_checkpoint(model, optimizer, step):
-    # 把 state_dict copy 到 CPU (非阻塞)
-    state = {k: v.cpu() for k, v in model.state_dict().items()}
-    # 在后台线程写入存储
-    threading.Thread(target=torch.save, args=(state, f"ckpt_{step}.pt")).start()
-
-# 分布式 checkpoint (每张卡只存自己的 shard)
-from torch.distributed.checkpoint import save, load
-save(model.state_dict(), storage_writer=FileSystemWriter(path))
-```
-
-### 6.4.2 故障恢复
-
-大集群训练中故障是常态:
-- 16K GPU 训练，平均每 2-3 小时一次硬件故障
-- GPU 内存错误、网络抖动、节点宕机
-
-**DeepSeek-V3 的解决方案**:
-- 每 10 分钟快速 checkpoint 到本地 NVMe (ramdisk)
-- 故障时从最近的快速 checkpoint 恢复
-- 坏节点自动被替换节点顶替
-- 训练仅丢失 10 分钟内的进度
-
-### 6.4.3 MFU (Model FLOPS Utilization)
-
-**衡量训练效率的核心指标**:
-```
-MFU = 实际计算量 / (理论峰值算力 × 训练时间)
-
-好的 MFU:
-  单机: 50-60%
-  小集群 (64-256 GPU): 40-50%
-  大集群 (1K+ GPU): 30-45%
-  超大集群 (16K GPU): 35-40% (LLaMA 3 报告 38-43%)
-```
-
-**影响 MFU 的因素**:
-- 通信开销（并行策略选择）
-- Bubble 比例（PP 调度）
-- 数据加载延迟
-- Kernel 效率
-- Gradient checkpointing 的重计算开销
+**工业级 MFU 基准分布**：
+- 单机 8 卡环境：50%–60%
+- 中等规模集群 (64–256 GPU)：45%–55%
+- 超大规模集群 (1K–16K GPU)：35%–45%（LLaMA 3 405B 在 16K 卡集群上达成 38%–43% 的卓越 MFU）
 
 ## 关键论文
 
-- [Rajbhandari et al. (2019) — ZeRO](https://arxiv.org/abs/1910.02054) — 数据并行下的显存优化（DeepSpeed 核心）
-- [Shoeybi et al. (2019) — Megatron-LM](https://arxiv.org/abs/1909.08053) — Tensor Parallelism 在 transformer 上的实现
-- [Huang et al. (2018) — GPipe](https://arxiv.org/abs/1811.06965) — Pipeline Parallelism 经典工作
-- [Dao et al. (2022) — FlashAttention](https://arxiv.org/abs/2205.14135) — IO-aware attention，2-4x 加速
-- [Dao (2023) — FlashAttention-2](https://arxiv.org/abs/2307.08691) — 进一步并行优化
+- [Rajbhandari et al. (2019) — ZeRO](https://arxiv.org/abs/1910.02054): 零冗余优化器内存切分奠基之作
+- [Shoeybi et al. (2019) — Megatron-LM](https://arxiv.org/abs/1909.08053): Transformer 张量并行与流水线设计
+- [Huang et al. (2018) — GPipe](https://arxiv.org/abs/1811.06965): 经典流水线并行架构
+- [Dao et al. (2022) — FlashAttention](https://arxiv.org/abs/2205.14135): 基于 IO 内存层次优化的极速注意力算子
+- [Dao (2023) — FlashAttention-2](https://arxiv.org/abs/2307.08691): 极致并行度与线程块工作划分优化
 
-## 进一步阅读
+## 进阶参考
 
-- [Megatron-LM repo](https://github.com/NVIDIA/Megatron-LM)：3D 并行参考实现
-- [DeepSpeed docs](https://www.deepspeed.ai/)：ZeRO-1/2/3 配置
-- [How to Train Really Large Models](https://lilianweng.github.io/posts/2021-09-25-train-large/) — Lilian Weng
+- NVIDIA: [Megatron-LM 官方代码库](https://github.com/NVIDIA/Megatron-LM)（前沿 3D 并行工业级参考实现）
+- Microsoft: [DeepSpeed 官方文档](https://www.deepspeed.ai/)（ZeRO 体系最佳实践）
+- Lilian Weng: [How to Train Really Large Models](https://lilianweng.github.io/posts/2021-09-25-train-large/)（系统级大模型训练全景剖析）
 
-## 练习题
+## 实践训练
 
-1. **显存预算**：估算训练 70B 模型所需 GPU 数量（FP16，AdamW，batch=1M tokens），分别在 ZeRO-1/2/3 下算一遍。
-2. **profile 训练**：用 PyTorch profiler 跑 nanoGPT 一个 step，找出耗时最多的 op，对比启用 FlashAttention 前后。
-3. **3D 并行配比**：给定 64 张 H100，训练 70B，思考 (DP, TP, PP) 的合理切法，并解释 TP 为何不能跨节点。
+1. **显存占用理论推导**：针对 70B 模型（BF16 精度，AdamW 优化器，批次 1M Tokens），分别推导在经典 DP、ZeRO-1、ZeRO-2 与 ZeRO-3 架构下的单卡显存占用构成。
+2. **PyTorch Profiler 性能瓶颈分析**：使用 PyTorch Profiler 分析单步 Transformer 前向与反向传播的耗时热点，量化开启 FlashAttention 与算子融合后的访存等待改善。
+3. **混合并行拓扑规划**：给定 64 块 H100 计算节点，设计训练 70B 密集基座的最佳 (DP, TP, PP) 组合参数，并从物理网络带宽角度阐述为何张量并行（TP）必须收敛于单机内部。
 
 ---
 

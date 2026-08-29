@@ -2,125 +2,125 @@
 
 # 术语表
 
-本文档收录 LLM 训练与部署中的高频术语。按主题分组。
+本文档系统收录大语言模型全栈训练与部署体系中的核心技术术语。内容按技术范畴结构化分组呈现。
 
-> 为节省空间，每个条目只保留 1–2 句要点；详细解释见对应章节。
+> 为契合快速检索需求，各词条提炼为精准精要的定义与机理概述；深层理论推导与工程实现请参阅对应章节。
 
 ---
 
 ## 架构 (Architecture)
 
-- **Attention（注意力）**：query/key/value 三元组通过点积加权求和；Transformer 的核心算子。
-- **MHA (Multi-Head Attention)**：把 attention 拆成多个并行 head 学习不同子空间。
-- **GQA (Group-Query Attention)**：多个 q head 共享一组 kv head，显著缩小 KV cache。Llama 2/3 在用。
-- **MQA (Multi-Query Attention)**：所有 q head 共享 1 组 kv head；GQA 的极端形式，质量略损。
-- **MLA (Multi-head Latent Attention)**：DeepSeek-V2 引入，把 KV 投影到低维潜空间，KV cache 比 GQA 还小。
-- **RoPE (Rotary Position Embedding)**：把位置信息以旋转矩阵形式注入 q/k；现代主流位置编码。
-- **ALiBi**：用线性偏置代替显式位置编码，外推能力强。
-- **SwiGLU**：FFN 的 gated 变体，比 GeLU 略好；几乎是新模型默认。
-- **MoE (Mixture of Experts)**：FFN 层用多个专家，每 token 只激活 top-k 个，参数大但 FLOPs 少。
-- **Routing**：MoE 中决定每个 token 走哪几个专家的机制。
-- **MTP (Multi-Token Prediction)**：训练时一次预测多个未来 token；DeepSeek-V3 用于加速 + 提升质量。
+- **Attention（注意力机制）**：基于 Query-Key-Value 三元组的点积相似度动态分配表征权重，构成 Transformer 架构的核心信息路由算子。
+- **MHA (Multi-Head Attention)**：将隐层空间投影至多个正交子空间并行计算注意力，捕捉多粒度的语法、语义与长程依赖。
+- **GQA (Group-Query Attention)**：多组 Query 共享同一组 Key/Value 投影头，在维持模型表征容量的同时显著压缩 KV Cache 显存占用，已成为主流开源基座的标准配置。
+- **MQA (Multi-Query Attention)**：所有 Query 头共享单一组 Key/Value 头，为 GQA 的极限退化形式，显存压缩收益最大，但表达容量略有折损。
+- **MLA (Multi-head Latent Attention)**：DeepSeek 提出的低秩潜空间注意力机制，将 Key 与 Value 联合压缩至低维流形投影，使推理期 KV Cache 占用远低于 GQA。
+- **RoPE (Rotary Position Embedding)**：通过复数旋转正交变换将绝对位置信息以相对距离衰减的形式隐式注入 Query 与 Key 向量，为当前大模型位置编码的标准方案。
+- **ALiBi**：在注意力得分矩阵上直接引入随相对距离线性递减的偏置惩罚，具备卓越的序列长度外推特性。
+- **SwiGLU**：引入门控线性单元（GLU）与 Swish 激活函数增强 FFN 层的非线性特征筛选能力，为现代前沿大模型的主流选择。
+- **MoE (Mixture of Experts)**：将前馈网络解耦为多个稀疏专家模块，每个 Token 仅由门控网络动态激活 Top-k 个专家，在拓宽参数容量的同时维持恒定的单 Token 计算复杂度。
+- **Routing**：MoE 架构中基于门控概率分布将 Token 动态分发至目标专家并实现负载均衡的核心调度机制。
+- **MTP (Multi-Token Prediction)**：在主干网络后并行构建多个预测头预测未来连续 Token，在加速推理推演的同时显著强化训练期的表征泛化能力。
 
 ## 训练目标 (Objectives)
 
-- **CLM (Causal LM)**：next-token prediction；GPT 系列的训练目标。
-- **MLM (Masked LM)**：随机遮盖 token 让模型还原；BERT 的训练目标。
-- **PrefixLM**：前缀双向 attention，后缀单向；T5 / GLM 用过。
-- **Next-Sentence Prediction**：BERT 的辅助任务；后被证明意义不大。
+- **CLM (Causal Language Modeling)**：自回归单向自注意力下的因果语言建模，通过最大化自左向右的 Next-Token 条件似然概率训练生成式大模型。
+- **MLM (Masked Language Modeling)**：随机掩码输入序列的部分 Token 并借助双向上下文进行完形填空重构，多用于编码器表征模型。
+- **PrefixLM**：在输入前缀部分采用双向全连接注意力，在目标生成部分采用因果单向注意力，兼顾上下文理解与自回归生成。
+- **Next-Sentence Prediction**：早期 BERT 用于判断句子连贯性的辅助二分类目标，后续研究证实其对深度语义表征增益有限，现代基座多已弃用。
 
 ## 后训练 (Post-Training)
 
-- **SFT (Supervised Fine-Tuning)**：用 (prompt, response) 对做有监督训练，教模型遵循指令。
-- **RLHF**：Reinforcement Learning from Human Feedback；reward model + PPO/GRPO 的三阶段流程。
-- **RLAIF**：把 RLHF 的人类反馈替换成 AI 反馈（如 Constitutional AI）。
-- **PPO**：最经典的策略梯度算法；OpenAI InstructGPT 用过。
-- **DPO (Direct Preference Optimization)**：跳过 reward model，直接用偏好对监督；简单稳定。
-- **GRPO**：DeepSeekMath 提出；不需 critic，靠组内相对排名估计 advantage。R1 用的。
-- **KTO**：只需 thumbs-up/down 单点反馈，无需 pairwise 偏好。
-- **Reward Model (RM)**：给输出打分的模型，通常从同 backbone 加 value head。
-- **KL 惩罚**：RL 阶段约束策略不要偏离 SFT 太远，防止 reward hacking。
-- **Constitutional AI**：用一组"宪法"原则让模型自我批评、自我改写，用于 RLAIF。
+- **SFT (Supervised Fine-Tuning)**：在高质量指令与回答对构建的样本集上进行有监督微调，引导预训练基座模型掌握对话交互与指令遵循范式。
+- **RLHF (Reinforcement Learning from Human Feedback)**：通过人类偏好标注训练奖励模型，并借助 PPO 或 GRPO 等策略梯度算法优化模型输出分布。
+- **RLAIF (Reinforcement Learning from AI Feedback)**：利用高阶模型或宪法原则（Constitutional AI）生成的机器反馈替代人工标注，实现低成本、可扩展的模型偏好对齐。
+- **PPO (Proximal Policy Optimization)**：基于重要性采样与裁剪目标函数的经典强化学习策略梯度优化算法，用于约束策略更新步幅。
+- **DPO (Direct Preference Optimization)**：基于隐式奖励函数将偏好对齐直接解析推导为分类交叉熵损失，摆脱独立奖励模型的训练与在线采样开销。
+- **GRPO (Group Relative Policy Optimization)**：DeepSeek 提出的免 Critic 强化学习算法，通过单 Prompt 多样化采样组内的相对优劣评估优势函数，大幅节约显存开销。
+- **KTO (Kahneman-Tversky Optimization)**：基于前景理论直接利用单样本正负二元反馈信号进行对齐优化，无需成对偏好数据。
+- **Reward Model (RM)**：通常基于同源预训练骨干网络后接标量投影头构建，负责评估文本序列契合人类偏好或客观规范的质量得分。
+- **KL 惩罚**：在强化学习目标函数中引入相对熵惩罚项，约束当前策略分布不偏离参考策略过远，防止策略塌陷与奖励作弊（Reward Hacking）。
+- **Constitutional AI**：通过一组预定义的行为原则引导模型进行自我反思与迭代修订，构建高质量对齐样本。
 
 ## 参数高效微调 (PEFT)
 
-- **PEFT**：只训练少量参数（通常 <1%）让大模型适配新任务的统称。
-- **LoRA**：在 q/k/v/o 矩阵旁加低秩 ΔW = BA，只训 B、A；推理时可合并。
-- **QLoRA**：4-bit NF4 量化 backbone + LoRA，单卡可训 65B。
-- **Adapter**：在 transformer 层间插入小 MLP 模块。
-- **IA³**：每层引入 3 个缩放向量；参数比 LoRA 还少。
-- **Prefix Tuning / P-Tuning**：在 attention 输入前拼接可学习 prefix token。
+- **PEFT (Parameter-Efficient Fine-Tuning)**：在冻结基座绝大部分参数的前提下，仅微调极小比例（通常低于 1%）附加参数的适配技术总称。
+- **LoRA (Low-Rank Adaptation)**：在原始密集权重矩阵旁路引入低秩分解矩阵（$\Delta W = BA$），推理期可将增量无缝折叠回原始权重，实现零额外时延。
+- **QLoRA**：结合 4-bit NormalFloat（NF4）基座量化、双重量化与分页优化器技术，极大压缩微调显存门槛。
+- **Adapter**：在 Transformer 模块层间插入瓶颈结构的轻量级 MLP 残差分支以注入下游任务知识。
+- **IA³**：通过引入可学习的通道缩放向量对 Key、Value 激活值及 FFN 中间表征进行微调，参数量比 LoRA 更加轻量。
+- **Prefix Tuning / P-Tuning**：在输入层或多层注意力层前拼接连续可学习虚拟 Token 表征，引导模型自适应不同下游任务。
 
 ## 训练基础设施 (Infra)
 
-- **DP (Data Parallelism)**：多 GPU 各持完整模型副本，处理不同 batch。
-- **TP (Tensor Parallelism)**：把单个矩阵在多 GPU 间切分计算，需要高带宽。
-- **PP (Pipeline Parallelism)**：把模型层切到不同 GPU，用 micro-batch 重叠。
-- **3D 并行**：DP × TP × PP 三维组合，万卡训练标配。
-- **ZeRO**：DeepSpeed 的核心；分别在 DP 上切分 optimizer state / gradient / param 来省显存。
-- **FSDP**：PyTorch 的 ZeRO-3 等价实现。
-- **FlashAttention**：IO-aware attention，把 softmax 融合在 SRAM 中算，2-4x 加速。
-- **Gradient Checkpointing**：用前向重算换显存；大模型训练标配。
-- **Mixed Precision**：BF16/FP16 计算 + FP32 优化器状态。
-- **FP8 训练**：H100 起的 8-bit 训练，DeepSeek-V3 是首个大规模实战。
-- **NCCL**：NVIDIA 的多卡 / 多机通信库；AllReduce / AllGather 的事实标准。
-- **NVLink / InfiniBand**：节点内 / 节点间高速互联。
+- **DP (Data Parallelism)**：各计算节点持有模型全量参数副本并独立分发数据微批次，通过梯度全约简（AllReduce）保持参数同步更新。
+- **TP (Tensor Parallelism)**：将单层算子的权重矩阵按行或按列切分至多张 GPU 并行计算，依赖机内极高带宽互联。
+- **PP (Pipeline Parallelism)**：将网络深度方向的若干层流水线切分至不同节点，借助微批次流水调度隐藏流水线空泡（Bubble）。
+- **3D 并行**：融合数据并行、张量并行与流水线并行的多维混合策略，为超大规模万卡集群预训练的标准范式。
+- **ZeRO (Zero Redundancy Optimizer)**：DeepSpeed 提出的显存冗余消除技术，通过在数据并行维度渐进式切分优化器状态、梯度与模型参数以释放显存。
+- **FSDP (Fully Sharded Data Parallel)**：PyTorch 原生实现的完全分片数据并行机制，对应 ZeRO-3 级别的参数分片与通信编排。
+- **FlashAttention**：利用 GPU 内存层次结构特性，通过分块重计算与在线 Softmax 避免将注意力矩阵物化写入显存，实现近线性显存占用与数倍吞吐加速。
+- **Gradient Checkpointing**：在前向传播阶段丢弃大部分中间激活值，反向传播时按需局部重计算，以计算开销换取显存容量的大幅节省。
+- **Mixed Precision**：采用 BF16 或 FP16 执行前向与反向张量乘法，并在优化器更新阶段保留 FP32 高精度主权重的混合训练机制。
+- **FP8 训练**：利用前沿芯片张量核心原生支持的 8 位浮点格式（E4M3/E5M2）进行高吞吐量矩阵运算与显存通信。
+- **NCCL**：NVIDIA 针对多 GPU 架构深度优化的集合通信库，构成分布式训练中 AllReduce、AllGather 等通信原语的底层标准。
+- **NVLink / InfiniBand**：分别构筑节点内极高带宽跨卡互联与跨节点低延迟无阻塞网络互联的硬件底座。
 
 ## 推理 (Inference)
 
-- **KV cache**：缓存历史 token 的 K/V，避免重复计算；自回归推理的核心优化。
-- **PagedAttention**：vLLM 的 KV cache 分页管理，按需分配，降低碎片。
-- **Continuous Batching**：动态拼 batch，新请求随时插入；vLLM/SGLang 标配。
-- **Speculative Decoding**：小模型先猜 N 个 token，大模型一次性验证；省 forward。
-- **Medusa**：多个并行预测头加速 decoding；Spec Decoding 的简化变体。
-- **Prefix caching**：相同 system prompt 只计算一次 KV，跨请求复用。
-- **量化 (Quantization)**：把权重从 FP16 → INT8 / INT4，省显存 + 加速；推理几乎无损。
-- **GPTQ / AWQ**：两种主流后训练量化方法；AWQ 对激活敏感权重更友好。
+- **KV Cache**：自回归生成阶段缓存历史 Token 计算所得的 Key 与 Value 状态张量，避免重复计算并实现 $O(1)$ 单步增量复杂度。
+- **PagedAttention**：借鉴操作系统虚拟内存分页思想，将 KV Cache 离散存储于非连续显存块中，从根本上解决显存碎片与预留浪费。
+- **Continuous Batching**：在请求级别实施细粒度迭代调度，允许新请求在解码间隙即时插入并与完成请求解耦，极大提升服务并发吞吐。
+- **Speculative Decoding (投机采样)**：利用小型草稿模型快速生成候选 Token 序列，主模型单次前向并行验证接受，显著降低单 Token 延迟。
+- **Medusa**：在主模型顶层挂载多个并行轻量预测头生成未来 Token 候选，无需引入独立草稿模型即可实现投机加速。
+- **Prefix Caching**：针对共有系统提示词或长文档前缀的 KV Cache 进行全局跨请求缓存与复用，显著削减预填充阶段的延迟与算力消耗。
+- **量化 (Quantization)**：将连续浮点权重与激活值映射至低比特离散整数域（如 INT8/INT4/FP8），在极小精度退化下大幅降低显存开销与带宽负载。
+- **GPTQ / AWQ**：主流离线后训练量化（PTQ）方法；AWQ 通过保护突出的显著权重通道，在低比特截断下表现出更稳健的表征保真度。
 
 ## 评测 (Evaluation)
 
-- **Perplexity (PPL)**：模型在测试集上的指数化负对数似然；越低越好。
-- **MMLU**：57 学科多选题；通用知识标杆。
-- **GSM8K**：小学到中学数学题；测推理。
-- **HumanEval / MBPP**：代码生成基准。
-- **MT-Bench**：用 GPT-4 当裁判评对话能力。
-- **Chatbot Arena**：人类盲测打分的真榜单。
-- **HELM**：Stanford 提出的全面评测框架。
+- **Perplexity (PPL)**：测试语料在模型因果预测下的指数化交叉熵损失，直接反映模型对序列概率分布的建模与压缩能力。
+- **MMLU**：跨越人文、社科、理工等 57 个学科维度的多选题基准，用于评估基座模型的通用世界知识与推理厚度。
+- **GSM8K**：包含高质量小学至初中数学应用题的评测集，核心考察模型的多步逻辑推演与符号计算能力。
+- **HumanEval / MBPP**：基于函数级单元测试通过率（Pass@k）的代码生成与算法实现能力评估基准。
+- **MT-Bench**：以高阶大模型为裁判（LLM-as-a-Judge）对多轮开放式人机交互对话质量进行系统性评估的基准。
+- **Chatbot Arena**：基于人类匿名双盲对战与 Elo 评分体系的大模型真实交互能力客观评估平台。
+- **HELM**：斯坦福大学提出的多维度、全方位大模型综合评估框架。
 
 ## 数据 (Data)
 
-- **CommonCrawl / C4 / The Pile / FineWeb**：常见预训练语料。
-- **Deduplication**：去重；MinHash / SuiteSparse 等。
-- **Quality filter**：基于分类器或启发式规则过滤低质内容。
-- **Mixture / Curriculum**：训练数据的混合配比与顺序。
+- **CommonCrawl / C4 / The Pile / FineWeb**：支撑现代大模型预训练的典型大规模公开网络抓取与合成清洗语料库。
+- **Deduplication (去重)**：基于 MinHash、LSH 或后缀数组等算法在文档级与句子级消除重复文本，提升训练泛化效率并防止记忆过拟合。
+- **Quality Filter**：综合运用轻量级分类器、语言学规则与困惑度阈值滤除低质文本、机器乱码与垃圾信息。
+- **Mixture / Curriculum**：预训练阶段多源语料的配比混合策略与随训练推进动态调整的渐进式数据课程设计。
 
-## RAG / 检索
+## RAG / 检索 (Retrieval-Augmented Generation)
 
-- **Embedding**：把文本映射成稠密向量。
-- **Bi-encoder（双塔）**：query 和 document 分别 encode，点积匹配；快但精度低。
-- **Cross-encoder**：query 和 document 一起喂入，计算精确相似度；慢但准。
-- **Reranker**：先用 bi-encoder 召回，再用 cross-encoder 精排。
-- **BM25**：经典稀疏检索基线；至今仍是混合检索一档。
-- **ColBERT / Late Interaction**：token 级匹配，介于 bi-encoder 和 cross-encoder 之间。
-- **Hybrid Search**：BM25 + dense 的加权融合。
+- **Embedding**：利用编码器将离散文本映射至高维连续语义几何流形空间的稠密向量表示。
+- **Bi-encoder（双塔架构）**：查询项与文档项分别独立编码生成表征向量，推理期通过近似最近邻（ANN）点积快速计算相似度。
+- **Cross-encoder（交叉编码器）**：将查询项与文档项拼接后统一输入模型进行全注意力交互，精度极高但计算复杂度不适于大规模候选召回。
+- **Reranker (重排器)**：在两阶段检索架构中，利用交叉编码器对双塔召回的候选文档集进行高精度二次精细排序。
+- **BM25**：基于词频、逆文档频率与文档长度归一化的经典词法稀疏检索算法，构筑混合检索的重要基线。
+- **ColBERT / Late Interaction**：保留 Token 级别的细粒度多向量嵌入，在交互层计算最大相似度求和，兼具双塔的速度与交叉编码器的精度。
+- **Hybrid Search**：融合 BM25 词法稀疏匹配与稠密向量语义检索的加权混合召回策略。
 
-## 多模态
+## 多模态 (Multimodality)
 
-- **VLM (Vision-Language Model)**：能同时处理图文的模型。
-- **ViT (Vision Transformer)**：把图像切 patch 后当 token 喂 Transformer。
-- **CLIP**：图文对比学习的开山之作。
-- **VQA (Visual Question Answering)**：看图问答任务。
-- **OCR-free**：模型直接从图像读字而非依赖 OCR。
+- **VLM (Vision-Language Model)**：具备跨视觉表征与自然语言联合感知、对齐与生成能力的统一多模态模型。
+- **ViT (Vision Transformer)**：将图像网格解构为离散 Patch 序列并进行线性投影，直接复用 Transformer 骨干进行全局视觉表征建模。
+- **CLIP**：基于大规模图文对比学习（Contrastive Learning）将视觉与文本模态映射至统一语义度量空间的基石模型。
+- **VQA (Visual Question Answering)**：结合输入图像视觉信息与自然语言提问进行跨模态推理并生成精准回答的任务。
+- **OCR-free**：模型凭借强大的视觉编码能力直接感知并解析图像中的排版与文本内容，摆脱独立的 OCR 预处理管线。
 
-## 推理时技巧
+## 解码采样技巧 (Decoding Strategies)
 
-- **Temperature**：采样温度；越高越随机，0 = greedy。
-- **Top-k / Top-p (nucleus)**：截断采样的两种方式。
-- **Repetition penalty**：惩罚最近出现过的 token，避免循环。
-- **Beam Search**：维护 N 个候选 beam 的搜索；翻译任务还在用。
-- **CoT (Chain-of-Thought)**：让模型先写思考过程再给答案。
-- **Few-shot**：在 prompt 里给几个示例。
-- **System prompt**：定义模型角色和约束的开头指令。
+- **Temperature**：控制 Softmax 概率分布平滑程度的温度超参数；数值越高生成越富有多样性，趋近于 0 则退化为贪心搜索（Greedy Search）。
+- **Top-k / Top-p (Nucleus Sampling)**：截断低概率尾部候选词的采样策略；Top-k 保留最高概率的固定数量候选，Top-p 动态截取累积概率阈值内的候选子集。
+- **Repetition Penalty**：对近期已生成的 Token 施加对数几率惩罚，有效抑制模型陷入局部自重复与死循环。
+- **Beam Search**：在解码搜索树上动态维护固定宽度（Beam Width）最高累积概率路径的启发式搜索策略，常用于机器翻译等确定性生成场景。
+- **CoT (Chain-of-Thought)**：通过显式生成中间思维推演链路，诱导模型逐步拆解复杂逻辑与推理步骤。
+- **Few-shot**：在上下文提示词中提供少量示范样本进行情境自适应学习（In-Context Learning）。
+- **System Prompt**：置于对话交互起始位置的全局指导性提示词，用于锚定模型的角色扮演、行为准则与输出约束。
 
 ---
 

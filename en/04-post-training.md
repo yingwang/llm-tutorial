@@ -2,324 +2,248 @@
 
 # Chapter 4: Post-Training
 
-Pretraining produces a "text completer" — post-training turns it into a useful "assistant."
+Pretraining constructs an unconstrained statistical next-token predictor; post-training aligns that raw representational capacity into a steerable, safe, and task-oriented assistant.
 
-## 4.1 Overview
+## 4.1 The Post-Training Alignment Hierarchy
 
 ```
-Base Model (pretrained)
+Base Model (Pretrained Foundation)
     │
     ▼
-SFT (Supervised Fine-Tuning)
-    │  - Learn to respond in instruction format
+Supervised Fine-Tuning (SFT)
+    │  - Format adherence, dialogue role-play, structured response syntax
     │
     ▼
-Preference Optimization (RLHF / DPO / ...)
-    │  - Learn what makes a "good" response
+Preference Optimization & Policy Alignment (RLHF / DPO / GRPO)
+    │  - Calibrating human values, stylistic conciseness, epistemic honesty
     │
     ▼
-Safety Training
-    │  - Refuse harmful requests
+Safety & Constitutional Alignment
+    │  - Adversarial robustness, jailbreak resistance, policy compliance
     │
     ▼
-Deployed Model
+Production Deployment Model
 ```
 
-## 4.2 SFT (Supervised Fine-Tuning)
+## 4.2 Supervised Fine-Tuning (SFT)
 
-### 4.2.1 Data Format
+### 4.2.1 Formatting Conventions and Loss Masking
 
-**Chat Format** (standard):
+**Chat Markup Standard** (ChatML / LLaMA-Instruct standard):
 ```
 <|im_start|>system
-You are a helpful assistant.<|im_end|>
+You are an expert systems engineer.<|im_end|>
 <|im_start|>user
-What is the capital of France?<|im_end|>
+Explain the memory layout of FlashAttention.<|im_end|>
 <|im_start|>assistant
-The capital of France is Paris.<|im_end|>
+FlashAttention optimizes GPU SRAM utilization by...<|im_end|>
 ```
 
-**Loss masking**: Only compute loss on the assistant's responses, not on the system or user messages.
+**Loss Masking (Selective Backpropagation)**: Cross-entropy loss is strictly calculated over assistant completion tokens. Loss computation over system prompts, user turns, and structural markup delimiters is masked to zero, ensuring gradients optimize generation behavior rather than memorizing prompt distributions.
 
-### 4.2.2 SFT Data Sources
+### 4.2.2 SFT Data Taxonomy
 
-| Source | Scale | Quality | Examples |
-|--------|-------|---------|----------|
-| Human annotation | 10K-100K | Very high | OpenAI's internal data, Anthropic's annotated data |
-| Open-source datasets | 100K-1M | Medium-High | [OpenAssistant](https://huggingface.co/datasets/OpenAssistant/oasst1), [Dolly](https://huggingface.co/datasets/databricks/databricks-dolly-15k), [ShareGPT](https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered) |
-| Synthetic | 1M+ | Medium | [Self-Instruct](https://arxiv.org/abs/2212.10560), [Evol-Instruct](https://arxiv.org/abs/2304.12244), [Magpie](https://arxiv.org/abs/2406.08464) |
-| Distillation | 1M+ | Medium-High | Use GPT-4/Claude to generate responses |
+| Data Provenance | Typical Scale | Quality Ceiling | Primary Applications |
+|-----------------|---------------|-----------------|----------------------|
+| Expert Human Demonstrations | 10K-100K | Very High | Complex creative synthesis, subtle safety boundaries |
+| Open Academic Corpora | 100K-1M | Medium to High | [OpenAssistant](https://huggingface.co/datasets/OpenAssistant/oasst1), [ShareGPT](https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered) |
+| Synthetic Expansion Pipelines | 1M+ | Scalable / Clean | [Self-Instruct](https://arxiv.org/abs/2212.10560), [Evol-Instruct](https://arxiv.org/abs/2304.12244), [Magpie](https://arxiv.org/abs/2406.08464) |
+| Frontier Model Distillation | 1M-10M | High | Synthetic teacher completions (GPT-4o, Claude 3.5 Sonnet) |
 
-**LIMA finding** ([Zhou et al., 2023](https://arxiv.org/abs/2305.11206)): "Less Is More for Alignment" — just 1000 high-quality SFT examples can give a model decent conversational ability. Quality > quantity.
+**The LIMA Hypothesis** ([Zhou et al., 2023](https://arxiv.org/abs/2305.11206)): "Less Is More for Alignment." The authors demonstrated that a base model fine-tuned on merely 1,000 meticulously curated, high-diversity instruction pairs achieves conversational fluency comparable to models trained on hundreds of thousands of web-scraped examples. Foundational knowledge is acquired during pretraining; SFT primarily acts as a superficial formatting and tone-setting layer.
 
-### 4.2.3 SFT Tips
+### 4.2.3 SFT Production Best Practices
 
-**Instruction Diversity**: More important than response quality. Cover: code, math, creative writing, summarization, translation, role-playing, tool use...
+- **Instruction Surface Diversity**: Orthogonal task coverage (system administration, algorithmic coding, creative translation, constrained reasoning, JSON serialization) yields far higher transfer capability than redundant variations of repetitive QA tasks.
+- **Rejection Sampling (Best-of-N Distillation)**: Generate $K$ stochastic candidate completions per prompt using the current checkpoint, score candidates against an auxiliary reward model or execution verifier, and retain only top-ranked trajectories for the next SFT iteration (central to the LLaMA 3 alignment pipeline).
+- **Optimization Hyperparameters**:
+  - Learning Rate: $1.0 \times 10^{-5}$ to $2.0 \times 10^{-5}$ (one to two orders of magnitude lower than pretraining).
+  - Training Epochs: 2 to 4 epochs for small curated datasets; 1 epoch when training over multi-million synthetic corpora to prevent overfitting and stylistic degeneration.
 
-**Rejection Sampling**: Generate N responses per prompt, select the best one using a reward model or rules. This is a key technique Meta used to train LLaMA 3.
+### 4.2.4 Long-Context Instruction Tuning
 
-**Hyperparameters**:
-- Learning rate: 1e-5 ~ 2e-5 (10-100x lower than pretraining)
-- Epochs: 2-5 (more epochs for less data, 1-2 epochs for more data)
-- Batch size: 128-512 samples
+- Synthesize tasks requiring deep retrieval and reasoning across full context budgets (multi-document cross-referencing, codebase architecture reviews, multi-hour meeting transcripts).
+- Ensure sequence length distributions span the entire context spectrum.
+- Validate retrieval fidelity across all context depths using synthetic "Needle in a Haystack" (NIAH) benchmarks.
 
-### 4.2.4 Long-Context SFT
+## 4.3 Reinforcement Learning from Human Feedback (RLHF)
 
-Specialized SFT for long-context capability:
-- Include long-document QA, multi-document summarization, long code comprehension tasks
-- Training data length distribution should cover the target context window
-- "Needle in a haystack" test to verify long-context capability
+### 4.3.1 The Canonical Three-Stage Pipeline
 
-## 4.3 RLHF (Reinforcement Learning from Human Feedback)
-
-### 4.3.1 Full Pipeline
-
-([Ouyang et al., 2022 — InstructGPT](https://arxiv.org/abs/2203.02155))
+([Ouyang et al., 2022: InstructGPT](https://arxiv.org/abs/2203.02155))
 
 ```
-Step 1: Reward Model Training
-    Collect human preference data: (prompt, chosen, rejected)
-    Train RM: RM(chosen) > RM(rejected)
+Stage 1: Supervised Fine-Tuning (SFT)
+    Train policy π_SFT on curated instruction demonstrations.
 
-Step 2: PPO Training
-    For each prompt:
-        1. Current policy π_θ generates a response
-        2. RM scores the response
-        3. Use PPO to optimize the policy, maximizing reward while staying close to the SFT model
+Stage 2: Reward Model (RM) Training
+    Gather paired preference comparisons: D = {(x, y_w, y_l)}
+    Train scalar discriminator RM: r_ψ(x, y_w) > r_ψ(x, y_l)
+
+Stage 3: Policy Optimization via PPO
+    Optimize active policy π_θ against scalar reward signals,
+    penalizing KL divergence relative to frozen reference policy π_SFT.
 ```
 
-### 4.3.2 Reward Model
+### 4.3.2 Reward Model Architecture and Bradley-Terry Modeling
 
 ```python
-# RM architecture: same Transformer as the LLM, with final layer replaced by a scalar head
+# Reward Model: Transformer backbone with scalar projection head
 class RewardModel(nn.Module):
-    def __init__(self, base_model):
-        self.backbone = base_model
-        self.head = nn.Linear(hidden_size, 1)  # output scalar reward
+    def __init__(self, base_backbone):
+        super().__init__()
+        self.backbone = base_backbone
+        self.value_head = nn.Linear(base_backbone.config.hidden_size, 1, bias=False)
     
-    def forward(self, input_ids):
-        hidden = self.backbone(input_ids).last_hidden_state[:, -1, :]
-        return self.head(hidden)  # scalar reward
+    def forward(self, input_ids, attention_mask):
+        hidden_states = self.backbone(input_ids, attention_mask=attention_mask).last_hidden_state
+        # Extract last token representation
+        last_token_repr = hidden_states[:, -1, :]
+        return self.value_head(last_token_repr)
 
-# Bradley-Terry Loss
-def bt_loss(reward_chosen, reward_rejected):
+# Bradley-Terry Preference Loss Formulation
+def bradley_terry_loss(reward_chosen, reward_rejected):
     return -torch.log(torch.sigmoid(reward_chosen - reward_rejected)).mean()
 ```
 
-**Preference data collection**:
-- Annotators see two responses to the same prompt and choose the better one
-- Can use Likert scale (1-7) or ranking (rank multiple responses)
-- Each prompt typically needs 3-5 annotators, with majority vote
+**Pathologies in Reward Modeling**:
+- **Reward Hacking**: The active policy exploits flaws in the reward model's proxy function (e.g., generating superficial structural formatting, excessive verbosity, or sycophantic phrasing) rather than producing genuinely superior reasoning.
+- **Over-Optimization Plateau**: Aggressive optimization against a static reward model causes actual response quality to degrade after an initial peak ([Gao et al., 2023](https://arxiv.org/abs/2210.10760)).
+- **Distributional Shift**: The reward model, trained exclusively on historical SFT candidate outputs, yields unreliable out-of-distribution scores when evaluating completions from a heavily modified RL policy.
 
-**RM issues**:
-- **Reward hacking**: The model learns to game the RM rather than genuinely improving (e.g., always giving long responses, using filler connectives)
-- **Over-optimization**: Pushing the RM score too far causes performance to degrade ([Gao et al., 2023](https://arxiv.org/abs/2210.10760))
-- **Distribution shift**: The RM is trained on SFT model outputs and may be inaccurate on post-PPO outputs
-
-### 4.3.3 PPO (Proximal Policy Optimization)
+### 4.3.3 Proximal Policy Optimization (PPO)
 
 ([Schulman et al., 2017](https://arxiv.org/abs/1707.06347))
 
-```python
-# PPO objective:
-L = E[min(r_t * A_t, clip(r_t, 1-ε, 1+ε) * A_t)]
+$$\mathcal{L}_{\text{PPO}}(\theta) = \hat{\mathbb{E}}_t \left[ \min\left( \rho_t(\theta) \hat{A}_t, \text{clip}(\rho_t(\theta), 1 - \varepsilon, 1 + \varepsilon) \hat{A}_t \right) \right]$$
 
-# r_t = π_θ(a|s) / π_θ_old(a|s)  # importance sampling ratio
-# A_t = advantage estimate (reward - baseline)
-# ε = 0.2 typically (clipping range)
+where $\rho_t(\theta) = \frac{\pi_\theta(y_t \mid x, y_{<t})}{\pi_{\text{old}}(y_t \mid x, y_{<t})}$, and $\hat{A}_t$ represents Generalized Advantage Estimation (GAE).
 
-# KL penalty to prevent the model from drifting too far from the SFT baseline:
-reward_total = reward_rm - β * KL(π_θ || π_ref)
-# π_ref = SFT model (frozen)
-# β = 0.01-0.1
-```
+**Regularized Composite Reward**:
+$$R(x, y) = r_\psi(x, y) - \beta D_{\text{KL}}\left( \pi_\theta(y \mid x) \,\|\, \pi_{\text{ref}}(y \mid x) \right)$$
 
-**PPO engineering challenges**:
-- Requires running 4 models simultaneously: policy (being trained), reference policy (frozen), reward model, value model
-- Extremely high memory demand (a 70B model needs ~512 A100s)
-- Unstable training, sensitive hyperparameters
-- Extensive engineering optimizations: async generation, vLLM for inference acceleration, sharing critic model and policy model
+**Systems Complexity in PPO**:
+- Requires coordinating four distinct model instances concurrently in cluster memory: Policy Network (trainable), Value Critic Network (trainable), Reference Policy (frozen), and Reward Model (frozen).
+- High hardware footprint requiring multi-node tensor-parallel orchestration.
 
-### 4.3.4 Practical Alternatives
+### 4.3.4 Modern Efficient RL Formulations
 
 **REINFORCE Leave-One-Out (RLOO)** ([Ahmadian et al., 2024](https://arxiv.org/abs/2402.14740)):
-- A simpler alternative to PPO
-- Generate K responses per prompt, use leave-one-out baseline to estimate advantage
-- No value model needed, halving memory requirements
-- DeepSeek and LLaMA 3 actually use RLOO variants
+- Samples $K$ parallel completions per prompt, constructing baseline rewards directly from the empirical leave-one-out mean of the group:
+  $$\hat{A}_i = r(x, y_i) - \frac{1}{K - 1} \sum_{j \ne i} r(x, y_j)$$
+- Eliminates the auxiliary value critic network entirely, saving ~50% GPU memory during training.
 
-**GRPO (Group Relative Policy Optimization)** ([Shao et al., 2024 — DeepSeekMath](https://arxiv.org/abs/2402.03300)):
-- Used by DeepSeek-R1
-- Sample a group of responses per prompt
-- Use within-group relative ranking as the reward signal
-- No external reward model needed
+**Group Relative Policy Optimization (GRPO)** ([Shao et al., 2024 (DeepSeekMath)](https://arxiv.org/abs/2402.03300)):
+- Computes normalized advantage scores over a group of sampled completions:
+  $$\hat{A}_i = \frac{r_i - \text{mean}(\{r\})}{\text{std}(\{r\})}$$
+- Powers the reinforcement learning foundation of DeepSeek-R1 without requiring an external critic model.
 
-## 4.4 DPO (Direct Preference Optimization)
+## 4.4 Direct Preference Optimization (DPO)
 
-### 4.4.1 Core Idea
+### 4.4.1 Mathematical Formulation
 
 ([Rafailov et al., 2023](https://arxiv.org/abs/2305.18290))
 
-**Problem**: RLHF is too complex — it requires training an RM, running PPO, and managing 4 models.
+**Foundational Insight**: Under the Bradley-Terry preference model, the optimal policy $\pi^*$ can be expressed in closed form relative to the ground-truth reward function. Inverting this relationship allows the reward model to be analytically substituted out of the objective, formulating preference optimization directly over policy probabilities.
 
-**DPO's insight**: The RM + PPO can be collapsed into a simple supervised loss.
+$$\mathcal{L}_{\text{DPO}}(\theta; \pi_{\text{ref}}) = -\mathbb{E}_{(x, y_w, y_l) \sim \mathcal{D}} \left[ \log \sigma \left( \beta \log \frac{\pi_\theta(y_w \mid x)}{\pi_{\text{ref}}(y_w \mid x)} - \beta \log \frac{\pi_\theta(y_l \mid x)}{\pi_{\text{ref}}(y_l \mid x)} \right) \right]$$
 
-```python
-# DPO loss:
-L_DPO = -E[log σ(β * (log π_θ(y_w|x)/π_ref(y_w|x) 
-                     - log π_θ(y_l|x)/π_ref(y_l|x)))]
+where $y_w$ and $y_l$ denote the winning and losing completions, $\pi_{\text{ref}}$ represents the frozen SFT baseline, and $\beta$ controls the strength of the implicit KL constraint.
 
-# y_w = chosen (winning) response
-# y_l = rejected (losing) response
-# π_ref = reference policy (SFT model, frozen)
-# β = temperature (typically 0.1-0.5)
-```
+### 4.4.2 Preference Optimization Taxonomy
 
-**Intuition**: Increase the probability of the chosen response, decrease the probability of the rejected response, with magnitude controlled by β. The reference model prevents excessive drift.
+| Paradigm | Distinguishing Mechanism | Reference Paper |
+|----------|--------------------------|-----------------|
+| **IPO** | Adds quadratic identity regularization to prevent over-fitting | [Azar et al., 2023](https://arxiv.org/abs/2310.12036) |
+| **KTO** | Formulates optimization over unpaired binary feedback signals | [Ethayarajh et al., 2024](https://arxiv.org/abs/2402.01306) |
+| **ORPO** | Monolithic SFT + preference loss without reference model | [Hong et al., 2024](https://arxiv.org/abs/2403.07691) |
+| **SimPO** | Directly uses length-normalized log-probabilities with target margin | [Meng et al., 2024](https://arxiv.org/abs/2405.14734) |
 
-### 4.4.2 DPO Variants
+### 4.4.3 Iterative Online DPO
 
-| Variant | Improvement | Paper |
-|---------|-------------|-------|
-| **IPO** | Prevents overfitting to preference data | [Azar et al., 2023](https://arxiv.org/abs/2310.12036) |
-| **KTO** | Only needs good/bad labels, no pairs required | [Ethayarajh et al., 2024](https://arxiv.org/abs/2402.01306) |
-| **ORPO** | No reference model needed | [Hong et al., 2024](https://arxiv.org/abs/2403.07691) |
-| **SimPO** | Uses sequence-average log-prob as reward | [Meng et al., 2024](https://arxiv.org/abs/2405.14734) |
+While standard offline DPO trains over a static dataset of historical completions, **Iterative Online DPO** ([Xu et al., 2024](https://arxiv.org/abs/2404.07503)) samples fresh rollouts from the active policy $\pi_\theta$ at each iteration, labels preferences dynamically using an automated judge, and updates the weights. This mitigates out-of-distribution drift and matches the empirical frontier of online PPO.
 
-### 4.4.3 Online DPO vs Offline DPO
+## 4.5 Constitutional AI (CAI) and RLAIF
 
-**Offline DPO**: Train on preference data generated by the SFT model → simple but has a performance ceiling
-
-**Online/Iterative DPO** ([Xu et al., 2024](https://arxiv.org/abs/2404.07503)):
-```
-Loop:
-    1. Generate responses with current policy π_θ
-    2. Label preferences with RM (or humans / stronger model)
-    3. Update π_θ with DPO loss
-```
-- Performance approaches RLHF
-- Solves the distribution shift problem of offline DPO
-
-## 4.5 Constitutional AI (CAI)
-
-([Bai et al., 2022](https://arxiv.org/abs/2212.08073)) Proposed by Anthropic — uses a set of "constitutional rules" for self-alignment:
+([Bai et al., 2022](https://arxiv.org/abs/2212.08073)) Developed by Anthropic to automate alignment using explicit behavioral constitutions:
 
 ```
-Step 1: Red-teaming
-    Have the model generate harmful responses
+Stage 1: Critique and Revision (Supervised Phase)
+    Prompt model with red-teaming queries.
+    Model critiques its initial draft against constitutional principles.
+    Model iteratively rewrites response to satisfy safety and helpfulness guidelines.
 
-Step 2: Critique & Revision
-    Model self-critiques and revises based on constitutional rules
-    Rules such as: "Choose the response that is least harmful"
-
-Step 3: RL from AI Feedback (RLAIF)
-    Train RM on the revised data
-    Train with RM + PPO
+Stage 2: Reinforcement Learning from AI Feedback (RLAIF)
+    Train an AI-directed preference model on constitutionally scored pairwise completions.
+    Align policy using RL against the resulting AI preference function.
 ```
 
-## 4.6 RLVR (Reinforcement Learning with Verifiable Rewards)
+## 4.6 Reinforcement Learning with Verifiable Rewards (RLVR)
 
-**[DeepSeek-R1](https://arxiv.org/abs/2501.12948)'s key innovation**: Use verifiable rewards (such as math answer correctness, code execution results) for RL, without needing human preference data.
-
-```
-For math problems:
-    1. Model generates chain-of-thought + final answer
-    2. Check if answer is correct → reward = 1 or 0
-    3. Optimize with GRPO
-
-For code problems:
-    1. Model generates code
-    2. Run test cases → reward = pass rate
-    3. Optimize with GRPO
-```
-
-**Surprising finding**: Pure RL (without SFT) can cause chain-of-thought reasoning to emerge. DeepSeek-R1-Zero learned long-chain reasoning through RLVR alone, without any SFT.
-
-## 4.7 Reasoning Models
-
-### 4.7.1 Chain-of-Thought Training
-
-**OpenAI o1/o3** and **[DeepSeek-R1](https://arxiv.org/abs/2501.12948)** represent a new paradigm:
+**The DeepSeek-R1 Paradigm** ([DeepSeek-AI, 2025](https://arxiv.org/abs/2501.12948)): Replaces soft preference models with deterministic, verifiable outcome oracles (e.g., formal compiler execution, automated unit test suites, mathematical proof checkers):
 
 ```
-Traditional: prompt → answer
-Reasoning:   prompt → <think>long chain-of-thought</think> → answer
+For Symbolic and Algorithmic Domains:
+    1. Sample completion rollouts with unstructured chain-of-thought blocks (<think>...</think>).
+    2. Extract boxed answers or executable code blocks.
+    3. Deterministic scoring: Reward = 1.0 (Correct / Pass), Reward = 0.0 (Incorrect / Fail).
+    4. Policy optimization via GRPO.
 ```
 
-Training methods:
-1. **Process Reward Model (PRM)** ([Lightman et al., 2023](https://arxiv.org/abs/2305.20050)): Score each reasoning step, not just the final answer (Outcome Reward Model, ORM)
-2. **Monte Carlo Tree Search (MCTS)**: Search for the optimal path in the reasoning tree
-3. **RLVR**: Train long-chain reasoning with verifiable rewards
+**Emergence of Autonomous Reasoning Chains**: DeepSeek-R1-Zero proved that large-scale RLVR applied directly to a base foundation model without prior SFT triggers spontaneous emergence of self-reflection, backtracking, alternative path exploration, and elongated chain-of-thought rollouts.
 
-### 4.7.2 Test-Time Compute Scaling
+## 4.7 Reasoning Models and Test-Time Compute
 
-Core insight: instead of using a larger model, let the model "think" longer at inference time. ([Snell et al., 2024](https://arxiv.org/abs/2408.03314))
+### 4.7.1 Process Reward Models (PRM)
 
-```
-Traditional scaling: larger model → better results
-New scaling:         more inference compute → better results
+([Lightman et al., 2023](https://arxiv.org/abs/2305.20050)) Rather than assigning a single scalar reward to the final answer (Outcome Reward Model, ORM), PRMs assign step-level reward scores to every discrete deductive transition in a solution trajectory, enabling fine-grained search and error localization.
 
-Specific methods:
-- Best-of-N: generate N responses, pick the best
-- Majority voting: generate N responses, take a vote
-- Chain-of-thought: have the model produce a long reasoning chain
-- Tree search: search through reasoning space
-- Iterative refinement: have the model repeatedly improve its response
-```
+### 4.7.2 Test-Time Compute Scaling Laws
 
-## 4.8 Tool Use & Agent Training
+Frontier systems (OpenAI o1/o3, DeepSeek-R1) scale performance along a complementary axis: expanding test-time compute ([Snell et al., 2024](https://arxiv.org/abs/2408.03314)):
 
-### 4.8.1 Function Calling
+$$\text{Downstream Accuracy} = f(\text{Pretraining Compute}, \text{Test-Time Inference Compute})$$
 
-Train models to output structured tool calls:
+**Search and Sampling Strategies**:
+- **Best-of-$N$ (Rejection Sampling)**: Sample $N$ independent trajectories; select candidate maximizing PRM score.
+- **Self-Consistency (Majority Voting)**: Sample multiple paths and aggregate final symbolic conclusions via majority consensus.
+- **Tree Search (MCTS)**: Perform lookahead expansion and value backpropagation over step-level reasoning graphs.
+
+## 4.8 Tool Integration and Agentic Post-Training
+
+### 4.8.1 Function Calling and Structured Interleaving
+
+Condition models to emit deterministic JSON action payloads bounded by special token schemas:
 
 ```json
-{"name": "search", "arguments": {"query": "weather in Stockholm"}}
+{"name": "execute_query", "parameters": {"sql": "SELECT count(*) FROM clusters WHERE status = 'active';"}}
 ```
 
-**Training data**: Collect (prompt, tool_call, tool_result, final_answer) trajectories
+### 4.8.2 Multi-Turn Environment Interaction (SWE-Bench)
 
-### 4.8.2 Code Execution
-
-```
-User: What is 7^23?
-Model: <code>print(7**23)</code>
-System: [Execution result: 27368747340080916343]
-Model: 7^23 = 27368747340080916343
-```
-
-### 4.8.3 Multi-step Agent
-
-Train models to execute multi-step tasks:
-
-```
-Observation → Thought → Action → Observation → Thought → Action → ... → Answer
-```
-
-**[SWE-Agent](https://github.com/princeton-nlp/SWE-agent)/[SWE-bench](https://www.swebench.com/)** style training:
-- Give the model a GitHub issue
-- Model reads code, edits files, runs tests
-- reward = tests pass
+Train models over extended agentic loops:
+$$\text{Observation} \longrightarrow \text{Internal Thought} \longrightarrow \text{Action} \longrightarrow \text{Environment Feedback}$$
+Supervised and RL training over repository-level issue resolution (e.g., [SWE-Agent](https://github.com/princeton-nlp/SWE-agent)) reinforces autonomous debugging, patch generation, and test validation.
 
 ## Key Papers
 
-- [Ouyang et al. (2022) — InstructGPT](https://arxiv.org/abs/2203.02155) — the classic three-stage RLHF
-- [Rafailov et al. (2023) — DPO](https://arxiv.org/abs/2305.18290) — preference optimization without a reward model
-- [Shao et al. (2024) — DeepSeekMath / GRPO](https://arxiv.org/abs/2402.03300) — the RL algorithm behind DeepSeek-R1
-- [Bai et al. (2022) — Constitutional AI](https://arxiv.org/abs/2212.08073) — RLAIF and principle-driven alignment
-- [Bai et al. (2022) — HH-RLHF](https://arxiv.org/abs/2204.05862) — Helpful & Harmless dataset and methodology
+- [Ouyang et al. (2022): Training Language Models to Follow Instructions with Human Feedback (InstructGPT)](https://arxiv.org/abs/2203.02155): Landmark RLHF methodology.
+- [Rafailov et al. (2023): Direct Preference Optimization: Your Language Model Is Secretly a Reward Model](https://arxiv.org/abs/2305.18290): Closed-form preference optimization framework.
+- [Shao et al. (2024): DeepSeekMath: Pushing the Limits of Mathematical Reasoning in Open Language Models](https://arxiv.org/abs/2402.03300): Introduction of GRPO.
+- [DeepSeek-AI (2025): DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning](https://arxiv.org/abs/2501.12948): Frontier RLVR and pure RL reasoning emergence.
+- [Bai et al. (2022): Constitutional AI: Harmlessness from AI Feedback](https://arxiv.org/abs/2212.08073): Self-critique alignment and RLAIF principles.
 
 ## Further Reading
 
-- HuggingFace — [TRL library](https://github.com/huggingface/trl) — production SFT / DPO / GRPO / PPO
-- Nathan Lambert — [Interconnects.ai](https://www.interconnects.ai/) — ongoing post-training coverage
-- [DeepSeek-R1 paper](https://arxiv.org/abs/2501.12948) — pure RL eliciting reasoning
+- Hugging Face: [TRL (Transformer Reinforcement Learning) Library](https://github.com/huggingface/trl) (Production-ready toolchain for SFT, DPO, and GRPO).
+- Nathan Lambert: [Interconnects.ai](https://www.interconnects.ai/) (In-depth analysis of post-training architectures and alignment literature).
+- OpenAI: [Learning to Reason with LLMs](https://openai.com/index/learning-to-reason-with-llms/) (Exploration of test-time compute and reasoning models).
 
 ## Exercises
 
-1. **SFT fine-tune**: use TRL to SFT a 1.5B base model on Alpaca-cleaned; compare base vs. SFT on MT-Bench.
-2. **DPO experiment**: from the same SFT checkpoint, run DPO on UltraFeedback; observe win-rate changes.
-3. **Reward hacking watch**: deliberately undertrain a reward model and run PPO; observe how the policy "games" the reward (repetition, special characters, exaggerated outputs).
+1. **End-to-End SFT Pipeline**: Using Hugging Face TRL, fine-tune a 1.5B base model on a high-quality instruction dataset (such as OpenAssistant or UltraFeedback); evaluate format adherence and refusal rates.
+2. **DPO vs. SFT Comparative Analysis**: Implement a DPO training run initialized from your SFT checkpoint using paired preference data; benchmark win-rate improvements on MT-Bench.
+3. **Reward Hacking Exploration**: Train a deliberately small reward model on a biased preference set (e.g., preferring verbose answers); run policy optimization and observe how the policy exploits length bias at the expense of substantive accuracy.
 
 ---
 

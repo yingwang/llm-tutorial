@@ -4,89 +4,95 @@
 
 # Chapter 12: Knowledge Distillation and Model Merging
 
-## 12.1 Knowledge Distillation
+Compressing capabilities and synthesizing specialized checkpoints can be achieved without full pretraining through two complementary post-training paradigms: cross-model knowledge distillation and weight-space parameter merging.
+
+## 12.1 Knowledge Distillation (KD)
 
 ([Hinton et al., 2015](https://arxiv.org/abs/1503.02531))
 
-**Core idea**: Train a small model (student) using soft labels from a large model (teacher).
+**Foundational Mechanism**: Transfers the dark knowledge (inter-class logit distributions and entropy structures) learned by a high-capacity teacher network to a lightweight student model.
 
-```python
-# Standard KD Loss
-L = α * CE(student_logits, hard_labels) + (1-α) * KL(
-    softmax(student_logits / T),
-    softmax(teacher_logits / T)
-) * T²
+$$\mathcal{L}_{\text{KD}} = \alpha \mathcal{L}_{\text{CE}}(P_S, y) + (1 - \alpha) T^2 D_{\text{KL}}\left( \sigma\left(\frac{z_T}{T}\right) \,\Big\|\, \sigma\left(\frac{z_S}{T}\right) \right)$$
 
-# T = temperature (typically 2-20), makes soft labels "softer"
-# α = weight balance between hard/soft labels
-```
+where $z_T$ and $z_S$ represent teacher and student unnormalized logits, $T$ denotes the softmax temperature scaling factor, and $\alpha$ balances hard ground-truth supervision against soft distillation targets.
 
-### LLM Distillation Methods
+### 12.1.1 Generative Distillation Paradigms for LLMs
 
-| Method | Description | Example |
-|--------|-------------|---------|
-| **Logit distillation** | Learn the teacher's output distribution | Classic KD |
-| **On-policy distillation** | Student generates → teacher scores → train student | GKD ([Agarwal et al., 2024](https://arxiv.org/abs/2306.13649)) |
-| **Synthetic data** | Teacher generates responses, used as SFT data for student | Alpaca, Vicuna |
-| **Reasoning distillation** | Teacher generates CoT → student learns CoT | DeepSeek-R1 distilled versions |
+| Paradigm | Operational Mechanism | Key Benefits | Representative Examples |
+|----------|----------------------|--------------|-------------------------|
+| **Logit-Level Distillation (Offline)** | Student matches teacher token distribution over fixed corpora | Captures full dark-knowledge entropy | Classic KD, MiniLLM ([Gu et al., 2023](https://arxiv.org/abs/2306.08543)) |
+| **On-Policy Generalized KD (GKD)** | Student samples rollouts; teacher scores student distribution | Mitigates out-of-distribution exposure bias | GKD ([Agarwal et al., 2024](https://arxiv.org/abs/2306.13649)) |
+| **Synthetic Sequence Distillation** | Teacher generates demonstrations used as SFT training targets | Simple pipeline, zero logit extraction | Alpaca, Vicuna, UltraFeedback |
+| **Reasoning Trace Distillation** | Teacher generates step-by-step reasoning tokens ($<\text{think}>\dots</\text{think}>$) | Transfers complex reasoning without RLVR | DeepSeek-R1 Distilled LLaMA / Qwen |
 
-**DeepSeek-R1 Distillation**: Distilled small models (1.5B-70B) from R1 (671B) reasoning traces, with surprisingly strong results.
+**The DeepSeek-R1 Distillation Impact**: DeepSeek demonstrated that fine-tuning compact foundation models (1.5B to 70B parameters) directly on 800,000 reasoning rollouts distilled from DeepSeek-R1 (671B) yields reasoning benchmarks competitive with models orders of magnitude larger, bypassing complex reinforcement learning loops for the student.
 
-## 12.2 Model Merging
+## 12.2 Weight-Space Model Merging
 
-Merge multiple models directly in weight space, with no additional training.
+Model merging combines orthogonal capabilities from multiple distinct fine-tuned checkpoints directly in parameter space without requiring gradient optimization or pretraining compute.
 
-### 12.2.1 Methods
+### 12.2.1 Core Merging Algorithmic Taxonomy
 
-| Method | Principle | Paper |
-|--------|-----------|-------|
-| **Linear** | `W = α * W_A + (1-α) * W_B` | - |
-| **SLERP** | Spherical linear interpolation | - |
-| **TIES** | Prune conflicting parameters, then merge | [Yadav et al., 2023](https://arxiv.org/abs/2306.01708) |
-| **DARE** | Randomly drop and rescale delta weights | [Yu et al., 2024](https://arxiv.org/abs/2311.03099) |
-| **Model Soups** | Average multiple fine-tune checkpoints | [Wortsman et al., 2022](https://arxiv.org/abs/2203.05482) |
+- **Linear Task Arithmetic**: Calculates task delta vectors relative to the base foundation model:
+  $$W_{\text{merged}} = W_{\text{base}} + \sum_{i=1}^M \lambda_i (W_i - W_{\text{base}})$$
+- **Spherical Linear Interpolation (SLERP)**: Interpolates between weight vectors along the high-dimensional hypersphere surface, preserving tensor geometric norms and directionality.
+- **TIES-Merging (Trimming, Resolving Signs, Electing)** ([Yadav et al., 2023](https://arxiv.org/abs/2306.01708)):
+  1. **Trim**: Retains only top-$k\%$ magnitude parameter updates, setting redundant parameters to zero.
+  2. **Elect Sign**: Resolves conflicting parameter directions via majority sign voting across models.
+  3. **Disjoint Merge**: Averages only parameter deltas that align with the elected consensus direction.
+- **DARE (Drop And REscale)** ([Yu et al., 2024](https://arxiv.org/abs/2311.03099)): Stochastically masks up to 90-99% of delta parameters to zero and rescales surviving parameters by $\frac{1}{1-p}$, virtually eliminating cross-model interference.
+- **Model Soups** ([Wortsman et al., 2022](https://arxiv.org/abs/2203.05482)): Uniformly averages weight checkpoints fine-tuned under varying learning rates and random seeds, consistently improving out-of-distribution robustness.
 
-### 12.2.2 Tools
+### 12.2.2 Mergekit Toolchain Configuration
 
-> [arcee-ai/mergekit](https://github.com/arcee-ai/mergekit) — The most popular model merging tool
+> Production toolkit: [arcee-ai/mergekit](https://github.com/arcee-ai/mergekit) (the de facto industry standard model merging engine).
 
 ```yaml
-# mergekit config example (YAML)
+# mergekit configuration: DARE-TIES Multi-Model Fusion
+merge_method: dare_ties
+base_model: meta-llama/Meta-Llama-3-8B
 models:
-  - model: base_model
+  - model: meta-llama/Meta-Llama-3-8B-Instruct
     parameters:
-      weight: 0.5
-  - model: math_model
+      weight: 0.4
+      density: 0.5
+  - model: wizardlm/WizardMath-7B-V1.1
     parameters:
       weight: 0.3
-  - model: code_model
+      density: 0.5
+  - model: deepseek-ai/deepseek-coder-7b-instruct
     parameters:
-      weight: 0.2
-merge_method: linear
+      weight: 0.3
+      density: 0.5
 dtype: bfloat16
 ```
 
-**Practical use**: Merge a general model + a math model + a code model to get a model good at all three, without any additional training. Many top models on the [Open LLM Leaderboard](https://huggingface.co/spaces/open-llm-leaderboard/open_llm_leaderboard) are produced this way.
+**Production Utility**: Blending general instruction, mathematical reasoning, and coding checkpoints via DARE-TIES produces hybrid foundation models excelling simultaneously across multiple domains with zero additional GPU training hours.
 
 ## Key Papers
 
-- [Hinton et al. (2015) — Distilling the Knowledge in a Neural Network](https://arxiv.org/abs/1503.02531) — the foundational KD paper
-- [Sanh et al. (2019) — DistilBERT](https://arxiv.org/abs/1910.01108) — the classic 6-layer BERT distillation
-- [Gu et al. (2023) — MiniLLM](https://arxiv.org/abs/2306.08543) — reverse KL for generative tasks
-- [Wortsman et al. (2022) — Model Soups](https://arxiv.org/abs/2203.05482) — averaging multiple fine-tune checkpoints
-- [Yadav et al. (2023) — TIES-Merging](https://arxiv.org/abs/2306.01708) — resolving merge conflicts
+- [Hinton et al. (2015): Distilling the Knowledge in a Neural Network](https://arxiv.org/abs/1503.02531): Foundational knowledge distillation paper.
+- [Sanh et al. (2019): DistilBERT: A Distilled Version of BERT: Smaller, Faster, Cheaper and Lighter](https://arxiv.org/abs/1910.01108): Architectural distillation baseline.
+- [Gu et al. (2023): Knowledge Distillation of Large Language Models (MiniLLM)](https://arxiv.org/abs/2306.08543): Reverse KL divergence for generative LLM distillation.
+- [Wortsman et al. (2022): Model Soups: Averaging Weights of Multiple Fine-Tuned Models Improves Accuracy Without Increasing Inference Time](https://arxiv.org/abs/2203.05482): Foundational weight averaging methodology.
+- [Yadav et al. (2023): Resolving Interference When Merging Models (TIES-Merging)](https://arxiv.org/abs/2306.01708): Sign resolution and pruning framework.
+- [Yu et al. (2024): Language Models are Super Mario: Absorbing Abilities from Homologous Models with DARE](https://arxiv.org/abs/2311.03099): Extreme delta parameter pruning for model merging.
 
 ## Further Reading
 
-- [mergekit](https://github.com/arcee-ai/mergekit) — the de facto merging toolkit
-- [DistilBERT companion blog](https://medium.com/huggingface/distilbert-8cf3380435b5)
-- [Awesome KD](https://github.com/dkozlov/awesome-knowledge-distillation) — methods survey
+- Arcee AI: [Mergekit Official Repository](https://github.com/arcee-ai/mergekit) (Algorithms, YAML architectures, and merge recipes).
+- DeepSeek AI: [DeepSeek-R1 Distillation Recipes](https://github.com/deepseek-ai/DeepSeek-R1) (Reasoning trace distillation pipeline).
+- Charles Goddard: [Model Merging Guide](https://github.com/arcee-ai/mergekit/blob/main/docs/merge_methods.md) (Detailed mathematical breakdown of merging methods).
 
 ## Exercises
 
-1. **Simple KD**: distill Qwen2-7B (teacher) into a 1.5B student; compare student-from-SFT-only vs. student-from-KD-SFT.
-2. **Model Soup**: train three fine-tunes (different seeds / data subsets); average their weights and check whether the soup beats any single one.
-3. **TIES vs DARE**: with two complementary models in mergekit, try TIES, DARE, and SLERP; record evaluation deltas.
+1. **Synthetic Distillation Experiment**: Use DeepSeek-R1 to synthesize 10,000 reasoning solutions for GSM8K math problems; fine-tune a 1.5B student model on these trajectories and benchmark accuracy gains over standard direct SFT.
+2. **Model Soup Robustness Test**: Fine-tune three instances of a 1.5B model on identical instruction sets using three distinct random seeds; construct a Model Soup by averaging weights and evaluate whether the merged ensemble outperforms individual runs.
+3. **DARE vs. TIES Empirical Comparison**: Use `mergekit` to fuse an instruction-tuned model with a code-specialized model using SLERP, TIES, and DARE; evaluate cross-domain retention on HumanEval and MT-Bench.
+
+---
+
+[← Previous Chapter](11-sota-models.md) | [Table of Contents](README.md) | [Next Chapter →](13-roadmap.md)
 
 ---
 

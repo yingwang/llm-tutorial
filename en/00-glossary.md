@@ -10,117 +10,117 @@ High-frequency terms in LLM training and deployment, grouped by topic.
 
 ## Architecture
 
-- **Attention**: weighted sum of values via dot-product of query/key; the core operator of the Transformer.
-- **MHA (Multi-Head Attention)**: splits attention into parallel heads that learn different subspaces.
-- **GQA (Group-Query Attention)**: multiple q heads share one group of kv heads, dramatically shrinking the KV cache. Used by Llama 2/3.
-- **MQA (Multi-Query Attention)**: all q heads share a single kv-head group; the extreme of GQA, with mild quality loss.
-- **MLA (Multi-head Latent Attention)**: introduced in DeepSeek-V2 — projects KV to a low-rank latent space, even smaller than GQA.
-- **RoPE (Rotary Position Embedding)**: injects positional information by rotating q/k vectors; the modern standard.
-- **ALiBi**: replaces explicit positional encodings with a linear bias; strong length extrapolation.
-- **SwiGLU**: a gated FFN variant slightly outperforming GeLU; the de facto default in new models.
-- **MoE (Mixture of Experts)**: FFN layer with many experts; each token activates only top-k experts — large parameters, low FLOPs.
-- **Routing**: the mechanism in MoE that decides which experts each token is sent to.
-- **MTP (Multi-Token Prediction)**: predicts several future tokens during training; used by DeepSeek-V3 for speed and quality.
+- **Attention**: Weighted aggregation of value vectors via query-key dot-product affinity; the foundational operator of Transformer architectures.
+- **MHA (Multi-Head Attention)**: Partitions representations into parallel projection subspaces to capture diverse relational patterns simultaneously.
+- **GQA (Group-Query Attention)**: Multiple query heads share a single key-value head group, substantially reducing KV cache memory footprint (adopted in Llama 2/3).
+- **MQA (Multi-Query Attention)**: All query heads share a single key-value head; the extreme limit of GQA, trading marginal representational capacity for maximum memory efficiency.
+- **MLA (Multi-head Latent Attention)**: Introduced in DeepSeek-V2; compresses key-value states into a low-rank latent subspace, achieving smaller memory overhead than GQA.
+- **RoPE (Rotary Position Embedding)**: Encodes relative positional information by applying rotation matrices to query and key representations; the standard in modern LLMs.
+- **ALiBi**: Injects linear attention biases inversely proportional to token distances, offering strong zero-shot length extrapolation without explicit position embeddings.
+- **SwiGLU**: A Swish-gated Feed-Forward Network variant that consistently outperforms standard GELU/ReLU activations; the de facto modern default.
+- **MoE (Mixture of Experts)**: Replaces dense FFN layers with multiple expert sub-networks; dynamic routing activates only top-$k$ experts per token, decoupling parameter capacity from compute cost.
+- **Routing**: The gating mechanism in MoE architectures that dynamically assigns tokens to candidate expert networks based on learned dispatch scores.
+- **MTP (Multi-Token Prediction)**: Simultaneously predicts multiple sequential future tokens during training, improving representations and enabling speculative decoding (as in DeepSeek-V3).
 
 ## Training Objectives
 
-- **CLM (Causal LM)**: next-token prediction; the GPT-family objective.
-- **MLM (Masked LM)**: predict masked tokens; the BERT objective.
-- **PrefixLM**: bidirectional attention on the prefix, causal on the suffix; used in T5 / GLM.
-- **Next-Sentence Prediction**: BERT auxiliary task; later shown to add little value.
+- **CLM (Causal Language Modeling)**: Autoregressive next-token prediction conditioned on preceding context; the standard objective for GPT-style generative models.
+- **MLM (Masked Language Modeling)**: Bidirectional reconstruction of randomly masked tokens; the foundational objective of BERT-style encoders.
+- **PrefixLM**: Applies bidirectional attention over prompt prefixes and causal unidirectional attention over target completions; used in models like T5 and GLM.
+- **Next-Sentence Prediction (NSP)**: Binary classification auxiliary objective from original BERT; largely phased out in modern pretraining recipes.
 
 ## Post-Training
 
-- **SFT (Supervised Fine-Tuning)**: train on (prompt, response) pairs to teach instruction-following.
-- **RLHF**: Reinforcement Learning from Human Feedback — reward model + PPO/GRPO three-stage pipeline.
-- **RLAIF**: RLHF where human feedback is replaced by AI feedback (e.g., Constitutional AI).
-- **PPO**: classic policy-gradient algorithm; used by OpenAI InstructGPT.
-- **DPO (Direct Preference Optimization)**: skip the reward model and supervise directly on preference pairs; simple and stable.
-- **GRPO**: introduced in DeepSeekMath — no critic; estimates advantage from intra-group relative ranking. Used in R1.
-- **KTO**: needs only thumbs-up/down per sample, no pairwise preferences.
-- **Reward Model (RM)**: scores outputs; usually built on the same backbone with a value head.
-- **KL penalty**: keeps the RL policy close to the SFT model, mitigating reward hacking.
-- **Constitutional AI**: uses a set of "constitutional" principles to have the model self-critique and self-revise; a basis for RLAIF.
+- **SFT (Supervised Fine-Tuning)**: Supervised instruction tuning on curated prompt-response pairs to instill conversational and task-following behavior.
+- **RLHF (Reinforcement Learning from Human Feedback)**: Alignment framework aligning model generations with human intent via reward modeling and policy optimization (e.g., PPO or GRPO).
+- **RLAIF (Reinforcement Learning from AI Feedback)**: Alignment paradigm where human evaluators are replaced or augmented by scalable model-generated feedback (e.g., Constitutional AI).
+- **PPO (Proximal Policy Optimization)**: Actor-critic policy gradient algorithm with clipped surrogate objectives; foundational to early alignment pipelines such as InstructGPT.
+- **DPO (Direct Preference Optimization)**: Derives closed-form policy updates directly from preference pairs, bypassing explicit reward model training and reinforcement learning loops.
+- **GRPO (Group Relative Policy Optimization)**: Introduced in DeepSeekMath; removes the value critic network by computing baseline advantages over group-sampled completions (powers DeepSeek-R1).
+- **KTO (Kahneman-Tversky Optimization)**: Alignment objective derived from prospect theory that operates on binary (thumbs up / thumbs down) feedback without requiring paired preference data.
+- **Reward Model (RM)**: Discriminator network (typically sharing the backbone architecture with a scalar projection head) trained to score completion quality according to preference data.
+- **KL Penalty**: Regularization term penalizing divergence between the active RL policy and the reference SFT model, preventing reward hacking and policy collapse.
+- **Constitutional AI**: Self-alignment methodology where a model critiques and refines its own completions against an explicit set of behavioral principles.
 
 ## Parameter-Efficient Fine-Tuning (PEFT)
 
-- **PEFT**: umbrella term for methods that train only a small fraction of parameters (usually <1%).
-- **LoRA**: adds low-rank ΔW = BA next to q/k/v/o; only B and A are trained; mergeable at inference time.
-- **QLoRA**: 4-bit NF4-quantized backbone + LoRA; fits 65B on a single GPU.
-- **Adapter**: small MLP modules inserted between transformer layers.
-- **IA³**: three scaling vectors per layer; even fewer parameters than LoRA.
-- **Prefix / P-Tuning**: concatenates learnable prefix tokens at attention inputs.
+- **PEFT**: Paradigm of adaptation techniques that update or insert a small fraction of parameters (typically <1%) while freezing the base model weights.
+- **LoRA (Low-Rank Adaptation)**: Injects trainable rank-decomposition matrices ($\Delta W = BA$) into linear projections; can be folded directly into frozen weights at inference.
+- **QLoRA**: Combines 4-bit NormalFloat (NF4) base weight quantization with double quantization and paged optimizers, enabling 65B+ model fine-tuning on a single consumer GPU.
+- **Adapters**: Lightweight bottleneck feed-forward sub-layers inserted sequentially or in parallel within Transformer blocks.
+- **IA³ (Infused Adapter by Inhibiting and Amplifying Inner Activations)**: Scales inner activations via learned element-wise vectors, using even fewer parameters than LoRA.
+- **Prefix / P-Tuning**: Prepends learnable continuous virtual token embeddings to key-value representations across attention layers.
 
 ## Training Infrastructure
 
-- **DP (Data Parallelism)**: each GPU holds a full model replica, processes a different batch.
-- **TP (Tensor Parallelism)**: splits a single matrix across GPUs; requires high bandwidth.
-- **PP (Pipeline Parallelism)**: splits layers across GPUs and overlaps via micro-batches.
-- **3D Parallelism**: DP × TP × PP combined; the standard for 10K-GPU training.
-- **ZeRO**: the core of DeepSpeed; shards optimizer state / gradient / parameter across DP ranks.
-- **FSDP**: PyTorch's equivalent of ZeRO-3.
-- **FlashAttention**: IO-aware attention that fuses softmax in SRAM; 2–4× speedup.
-- **Gradient Checkpointing**: trade recomputation in the forward pass for memory; standard for large-model training.
-- **Mixed Precision**: BF16/FP16 compute with FP32 optimizer states.
-- **FP8 Training**: 8-bit training on H100+; DeepSeek-V3 was the first large-scale production use.
-- **NCCL**: NVIDIA's multi-GPU/multi-node communication library; the de facto standard for AllReduce / AllGather.
-- **NVLink / InfiniBand**: intra-node / inter-node high-speed interconnects.
+- **DP (Data Parallelism)**: Replicates the model across multiple devices, processing independent micro-batches and synchronizing gradients.
+- **TP (Tensor Parallelism)**: Partitions individual weight matrices (e.g., Megatron-style column/row parallel linear layers) across GPUs, requiring high intra-node interconnect bandwidth.
+- **PP (Pipeline Parallelism)**: Partitions model layers sequentially across devices and interleaves execution using pipelined micro-batches.
+- **3D Parallelism**: Composes DP, TP, and PP to scale pretraining across thousands of GPUs.
+- **ZeRO (Zero Redundancy Optimizer)**: Memory optimization paradigm partitioning optimizer states (Stage 1), gradients (Stage 2), and model parameters (Stage 3) across data-parallel ranks.
+- **FSDP (Fully Sharded Data Parallel)**: PyTorch native implementation of ZeRO-3 sharding for distributed parameter, gradient, and optimizer states.
+- **FlashAttention**: IO-aware exact attention algorithm tiling computation in GPU SRAM to minimize High Bandwidth Memory (HBM) read/write traffic; provides 2-4x speedups.
+- **Gradient Checkpointing (Activation Recomputation)**: Trades redundant forward compute for memory by discarding intermediate activations and recomputing them during the backward pass.
+- **Mixed Precision**: Uses BF16/FP16 for compute-heavy forward/backward passes while maintaining FP32 master weights and optimizer accumulators.
+- **FP8 Training**: Low-precision training format with dynamic scaling factors on Hopper/Blackwell architectures; pioneered at scale in DeepSeek-V3.
+- **NCCL**: NVIDIA Collective Communications Library; high-performance multi-GPU primitive library providing optimized AllReduce, AllGather, and ReduceScatter routines.
+- **NVLink / InfiniBand**: Ultra-high-bandwidth physical interconnect technologies for intra-node GPU-to-GPU and inter-node cluster fabric communication, respectively.
 
 ## Inference
 
-- **KV cache**: cache historical K/V tensors to avoid recomputation; the core autoregressive optimization.
-- **PagedAttention**: vLLM's paged KV-cache management — on-demand allocation, low fragmentation.
-- **Continuous Batching**: dynamic batch packing where new requests are inserted as they arrive; standard in vLLM/SGLang.
-- **Speculative Decoding**: a small model proposes N tokens, the large model verifies them in one forward pass; saves forwards.
-- **Medusa**: multiple parallel prediction heads; a simplified variant of speculative decoding.
-- **Prefix caching**: compute KV once for a shared system prompt and reuse across requests.
-- **Quantization**: convert weights from FP16 → INT8 / INT4 to save memory and accelerate; near-lossless for inference.
-- **GPTQ / AWQ**: two mainstream post-training quantization methods; AWQ is more activation-aware.
+- **KV Cache**: Stores computed key and value states from previous tokens to eliminate redundant computation during autoregressive generation.
+- **PagedAttention**: Memory allocation algorithm inspired by OS virtual memory paging; allocates KV cache dynamically in non-contiguous memory blocks, virtually eliminating fragmentation.
+- **Continuous Batching (Iteration-level Scheduling)**: Dynamically injects newly arriving requests and evicts finished requests on each decode step, maximizing GPU utilization.
+- **Speculative Decoding**: Uses a lightweight draft model to generate speculative candidate tokens, verified in parallel by the target model in a single forward pass.
+- **Medusa**: Multi-head speculative architecture generating multiple token predictions concurrently from a single backbone without an auxiliary draft model.
+- **Prefix Caching**: Retains and shares precomputed KV cache states for common prompt prefixes (e.g., system prompts) across concurrent requests.
+- **Quantization**: Maps high-precision floating-point weights (and optionally activations) to low-bit integer formats (e.g., INT8/INT4/FP8), reducing memory bandwidth pressure.
+- **GPTQ / AWQ**: Prominent post-training quantization (PTQ) techniques; AWQ protects salient weight channels by observing activation magnitudes.
 
 ## Evaluation
 
-- **Perplexity (PPL)**: exponentiated negative log-likelihood on test data; lower is better.
-- **MMLU**: 57-subject multiple choice; the general-knowledge benchmark.
-- **GSM8K**: grade-school to middle-school math; tests reasoning.
-- **HumanEval / MBPP**: code-generation benchmarks.
-- **MT-Bench**: GPT-4-as-judge for dialogue quality.
-- **Chatbot Arena**: blind human-preference leaderboard — the real ranking.
-- **HELM**: Stanford's holistic evaluation framework.
+- **Perplexity (PPL)**: Exponentiated cross-entropy loss over a validation corpus; measures how well the probability distribution predicts test tokens (lower is better).
+- **MMLU (Massive Multitask Language Understanding)**: Standardized benchmark testing broad knowledge and problem-solving across 57 academic subjects.
+- **GSM8K**: Grade-school math reasoning benchmark evaluating multi-step mathematical problem solving.
+- **HumanEval / MBPP**: Standard code generation benchmarks assessing functional correctness against unit tests.
+- **MT-Bench**: Multi-turn dialogue evaluation benchmark using strong LLMs (such as GPT-4) as judges.
+- **Chatbot Arena**: Crowdsourced, blind A/B evaluation platform tracking conversational capabilities via Elo ratings from real-world human interactions.
+- **HELM (Holistic Evaluation of Language Models)**: Comprehensive multi-metric evaluation framework assessing accuracy, robustness, fairness, and toxicity.
 
 ## Data
 
-- **CommonCrawl / C4 / The Pile / FineWeb**: common pretraining corpora.
-- **Deduplication**: dedup; MinHash / SuiteSparse / etc.
-- **Quality filter**: classifier-based or heuristic filtering of low-quality text.
-- **Mixture / Curriculum**: data mix ratios and ordering during training.
+- **Common Crawl / FineWeb / RedPajama**: Large-scale public web crawl datasets forming the backbone of modern open-source pretraining corpora.
+- **Deduplication**: Removing redundant text instances via MinHash, SimHash, or exact suffix arrays to prevent memorization and improve sample efficiency.
+- **Quality Filtering**: Heuristic and classifier-based pipeline filtering out machine-generated spam, toxic content, and low-quality web pages.
+- **Curriculum / Data Mixture**: Dynamic scheduling and domain proportioning (code, math, books, web) across pretraining stages to optimize learning trajectories.
 
-## RAG / Retrieval
+## RAG & Retrieval
 
-- **Embedding**: maps text to a dense vector.
-- **Bi-encoder**: encodes query and document separately, matches via dot product; fast, lower precision.
-- **Cross-encoder**: encodes query and document jointly for an exact similarity score; slow, accurate.
-- **Reranker**: first recall with a bi-encoder, then re-rank with a cross-encoder.
-- **BM25**: classic sparse-retrieval baseline; still in the top tier for hybrid search.
-- **ColBERT / Late Interaction**: token-level matching between bi-encoder and cross-encoder.
-- **Hybrid Search**: weighted fusion of BM25 + dense retrieval.
+- **Embedding Model**: Neural encoder mapping natural language text into dense semantic vector representations.
+- **Bi-Encoder**: Independently encodes queries and documents into separate vector embeddings, scoring similarity via dot product; fast and scalable for vector index search.
+- **Cross-Encoder**: Jointly processes query and document through full self-attention layers; highly accurate but computationally heavy, standard for re-ranking top candidates.
+- **Reranker**: Second-stage retrieval module refining candidates returned by fast initial retrieval passes using cross-attention scoring.
+- **BM25**: Classical probabilistic lexical retrieval algorithm; remains a powerful baseline and essential component in hybrid retrieval systems.
+- **ColBERT / Late Interaction**: Preserves token-level embeddings and performs max-similarity operations across query and document tokens, balancing bi-encoder efficiency with cross-encoder quality.
+- **Hybrid Search**: Fuses lexical keyword search (BM25) and dense semantic vector search via Reciprocal Rank Fusion (RRF) or convex score combinations.
 
 ## Multimodal
 
-- **VLM (Vision-Language Model)**: a model that processes images and text jointly.
-- **ViT (Vision Transformer)**: a transformer over image patches as tokens.
-- **CLIP**: the seminal image-text contrastive learning work.
-- **VQA (Visual Question Answering)**: question-answering grounded in an image.
-- **OCR-free**: model reads text directly from pixels rather than relying on OCR.
+- **VLM (Vision-Language Model)**: Multimodal architecture capable of understanding, grounding, and reasoning over both visual inputs and natural language.
+- **ViT (Vision Transformer)**: Architecture that treats non-overlapping 2D image patches as a sequence of input tokens processed by standard Transformer blocks.
+- **CLIP (Contrastive Language-Image Pre-Training)**: Dual-encoder model trained on massive image-text pairs via contrastive loss to map vision and text into a shared embedding space.
+- **VQA (Visual Question Answering)**: Benchmark task requiring models to answer open-ended questions conditioned on image context.
+- **OCR-Free Document Understanding**: Architecture that parses complex textual documents, layouts, and tables directly from raw image pixels without external OCR tools.
 
-## Inference-time Tricks
+## Inference-Time Techniques
 
-- **Temperature**: sampling temperature; higher is more random, 0 = greedy.
-- **Top-k / Top-p (nucleus)**: two ways to truncate the sampling distribution.
-- **Repetition penalty**: penalizes recently emitted tokens to break loops.
-- **Beam Search**: maintain N candidate beams during search; still common in translation.
-- **CoT (Chain-of-Thought)**: prompt the model to write reasoning steps before the final answer.
-- **Few-shot**: include a few examples in the prompt.
-- **System prompt**: leading instruction defining the model's role and constraints.
+- **Temperature**: Scaling parameter applied to output logits prior to softmax; controls randomness (lower values sharpen probabilities toward greedy argmax).
+- **Top-$k$ / Top-$p$ (Nucleus) Sampling**: Truncation strategies restricting sampling candidates to the $k$ most probable tokens or the smallest set whose cumulative probability exceeds $p$.
+- **Repetition Penalty**: Logit penalty applied to previously generated tokens to suppress repetitive degeneration loops.
+- **Beam Search**: Deterministic decoding heuristic maintaining top-$B$ partial sequence hypotheses at each step; widely used in translation and structured extraction.
+- **CoT (Chain-of-Thought)**: Prompting or generation strategy where intermediate reasoning steps are emitted sequentially before stating the final conclusion.
+- **Few-Shot Prompting**: Conditioning model generation by providing illustrative demonstration examples directly within the context window.
+- **System Prompt**: Foundational leading instruction specifying the model's persona, operational constraints, safety policies, and output formats.
 
 ---
 

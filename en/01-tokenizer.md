@@ -2,51 +2,51 @@
 
 # Chapter 1: Tokenizer
 
-The tokenizer is the entry point of an LLM — it converts raw text into a sequence of token IDs that the model can process. Tokenizer design directly affects vocabulary coverage, sequence length, multilingual capability, and training efficiency.
+The tokenizer serves as the primary gateway to a Large Language Model, transforming continuous human language into discrete sequences of token IDs. The design of the tokenization vocabulary and algorithm directly dictates sequence compression ratios, vocabulary coverage, multilingual expressiveness, and overall pretraining throughput.
 
 ## 1.1 Why We Need a Tokenizer
 
-Neural networks operate on numerical tensors, not strings. The simplest approach is character-level (one token per character), but this has problems:
-- Sequences are too long (a single sentence becomes dozens to hundreds of tokens), making attention's O(n²) cost prohibitive
-- No semantic granularity — the model has to learn word boundaries on its own
+Neural networks operate over numerical tensors rather than character strings. The simplest mapping is character-level tokenization (one token per character), but this strategy presents severe limitations:
+- Excessive sequence lengths: A single sentence expands into hundreds of tokens, making the $O(N^2)$ computational complexity of standard self-attention prohibitively expensive.
+- Absence of semantic granularity: The model must expend representational capacity rediscovering basic morphemic and word boundaries from scratch.
 
-The other extreme is word-level (one token per word), but:
-- The vocabulary explodes (English alone has hundreds of thousands of word forms)
-- Cannot handle OOV (out-of-vocabulary) words
-- Poor fit for CJK languages, where whitespace doesn't mark word boundaries
+The opposite extreme is word-level tokenization (one token per word), which also breaks down in practice:
+- Vocabulary explosion: Natural languages contain millions of distinct inflected forms, driving parameter count in embedding layers to unsustainable scales.
+- Inability to handle Out-Of-Vocabulary (OOV) tokens: Unseen words or rare compound terms cannot be represented.
+- Poor fit for non-segmented languages: Scripts such as Chinese and Japanese do not use whitespace to delimit word boundaries.
 
-Subword tokenization is the compromise: frequent words are kept as whole tokens, while rare words are split into subword fragments.
+Subword tokenization resolves this dilemma: frequent lexical items remain intact as atomic tokens, while rare or morphologically complex terms decompose into reusable subword fragments.
 
 ## 1.2 Core Algorithms
 
 ### 1.2.1 BPE (Byte Pair Encoding)
 
-**Principle**: Start from character (or byte) level, repeatedly merge the most frequent adjacent pair until the vocabulary reaches the target size.
+**Principle**: A bottom-up data compression algorithm that starts from individual characters (or bytes) and iteratively merges the most frequently adjacent symbol pairs until the target vocabulary budget is reached.
 
 **Training process**:
 ```
-Initial vocabulary: all single characters (or bytes 0-255)
+Initial vocabulary: all base characters (or bytes 0-255)
 Loop:
-    1. Count frequency of all adjacent token pairs
-    2. Merge the most frequent pair → new token
-    3. Update the token sequences in the corpus
-    4. Stop when vocabulary reaches target size
+    1. Count frequencies of all adjacent token pairs across the corpus
+    2. Merge the most frequent pair into a single new token
+    3. Update all occurrences in the corpus token sequences
+    4. Terminate when vocabulary reaches the target size
 ```
 
 **Example**:
 ```
 Corpus: "low lower lowest"
 Initial: ['l','o','w',' ','l','o','w','e','r',' ','l','o','w','e','s','t']
-Round 1: 'l'+'o' → 'lo' (appears 3 times, highest frequency)
-Round 2: 'lo'+'w' → 'low' (appears 3 times)
-Round 3: 'low'+'e' → 'lowe' (appears 2 times)
+Round 1: 'l'+'o' → 'lo' (frequency = 3)
+Round 2: 'lo'+'w' → 'low' (frequency = 3)
+Round 3: 'low'+'e' → 'lowe' (frequency = 2)
 ...
 ```
 
-**GPT series BPE**: OpenAI's [tiktoken](https://github.com/openai/tiktoken) improves on byte-level BPE:
-- Based on UTF-8 bytes rather than Unicode characters, natively supporting any language
-- Uses regex pre-tokenization (splits text into large chunks before running BPE) to prevent cross-word merges
-- GPT-4 uses the `cl100k_base` vocabulary with ~100K tokens
+**Byte-Level BPE in Modern LLMs**: OpenAI's [tiktoken](https://github.com/openai/tiktoken) and Hugging Face's tokenizers implement byte-level BPE with crucial engineering refinements:
+- Operates directly over raw UTF-8 byte sequences rather than Unicode code points, eliminating OOV tokens across arbitrary languages.
+- Applies regex-based pre-tokenization to partition text before merge counting, preventing merges across whitespace, punctuation, and numeric boundaries.
+- GPT-4 and GPT-4o utilize `cl100k_base` and `o200k_base` vocabularies containing ~100K and ~200K tokens, respectively.
 
 ```python
 # tiktoken usage
@@ -59,63 +59,63 @@ print(enc.decode(tokens))  # "Hello, world!"
 
 ### 1.2.2 WordPiece
 
-**Principle**: Similar to BPE, but with a different merge criterion. BPE selects the most frequent pair; WordPiece selects the pair that maximizes the language model likelihood improvement.
+**Principle**: Similar to BPE in its bottom-up construction, but selects merge candidates using a likelihood maximization objective rather than raw co-occurrence frequency.
 
-**Formula**: Select merge (x, y) → xy such that:
+**Scoring Criterion**: Selects the merge pair $(x, y) \to xy$ that maximizes:
 ```
-score(x, y) = freq(xy) / (freq(x) × freq(y))
+score(x, y) = freq(xy) / (freq(x) * freq(y))
 ```
 
-This is equivalent to pointwise mutual information (PMI). High PMI means x and y frequently co-occur, so merging them captures more information.
+This formulation directly mirrors Pointwise Mutual Information (PMI). A high score signifies that $x$ and $y$ co-occur far more frequently than expected by chance, maximizing the predictive information gained by fusing them.
 
-**Users**: BERT, DistilBERT, etc. Continuation subwords are marked with the `##` prefix (e.g., `playing` → `play` + `##ing`).
+**Usage**: Used prominently in BERT and DistilBERT. Non-initial subwords are conventionally prefixed with `##` (e.g., `playing` decomposes into `play` and `##ing`).
 
 ### 1.2.3 Unigram (SentencePiece)
 
-**Principle**: Works in reverse — starts from a large vocabulary and iteratively removes tokens whose removal causes the smallest decrease in corpus likelihood, until the vocabulary shrinks to the target size.
+**Principle**: Operates top-down: begins with an over-complete candidate vocabulary (e.g., millions of substrings) and iteratively prunes items whose removal minimizes the penalty to the corpus log-likelihood under a unigram language model.
 
 **Training process**:
 ```
-1. Initialize: build a large vocabulary from all substrings + characters (e.g., 1M)
-2. Estimate each token's probability P(token) using EM
-3. Compute each token's loss contribution: how much the corpus log-likelihood drops if removed
-4. Remove the 10-20% of tokens with the smallest loss contribution
-5. Repeat 2-4 until vocabulary reaches target size
+1. Initialize an over-complete candidate vocabulary from corpus substrings
+2. Estimate marginal token probabilities P(x) using the Expectation-Maximization (EM) algorithm
+3. Compute the loss penalty for each token: the reduction in corpus log-likelihood if removed
+4. Prune the bottom 10-20% of tokens with minimal loss impact
+5. Repeat steps 2-4 until the vocabulary meets the target size
 ```
 
-**Advantage**: Unigram returns N-best segmentations probabilistically — useful for subword regularization at training time.
+**Advantage**: Because Unigram defines a true generative probabilistic model over segmentations, it enables subword regularization (sampling alternative segmentations during pretraining to improve downstream robustness).
 
-**Users**: T5, LLaMA, Gemma, etc. all use [SentencePiece](https://github.com/google/sentencepiece)'s Unigram model.
+**Usage**: Adopted by T5, LLaMA, and Gemma via Google's [SentencePiece](https://github.com/google/sentencepiece) library.
 
-### 1.2.4 Comparison
+### 1.2.4 Algorithmic Comparison
 
 | Feature | BPE | WordPiece | Unigram |
 |---------|-----|-----------|---------|
 | Direction | Bottom-up merging | Bottom-up merging | Top-down pruning |
-| Merge criterion | Frequency | Likelihood/PMI | Likelihood (EM) |
-| Determinism | Deterministic | Deterministic | Probabilistic (can sample) |
-| Representative models | GPT series, LLaMA 2 | BERT | T5, LLaMA 3, Gemma |
+| Selection Metric | Frequency | Likelihood ratio / PMI | Marginal likelihood (EM) |
+| Determinism | Deterministic | Deterministic | Probabilistic (supports sampling) |
+| Representative Models | GPT series, LLaMA 2 | BERT | T5, LLaMA 3, Gemma |
 
-## 1.3 Byte-Level vs Character-Level
+## 1.3 Byte-Level vs Character-Level Representation
 
-**Byte-level BPE** (GPT-2/3/4, LLaMA):
-- Base units are UTF-8 bytes (0-255), not Unicode characters
-- Advantage: never encounters OOV — any byte sequence can be encoded
-- Disadvantage: non-ASCII characters (e.g., Chinese) may require 3+ bytes per character
+**Byte-Level BPE** (GPT-4, LLaMA):
+- Base alphabet consists of the 256 individual UTF-8 bytes rather than Unicode characters.
+- Advantage: Completely immune to out-of-vocabulary (OOV) tokens; any arbitrary byte sequence can be represented.
+- Trade-off: Non-ASCII characters (such as Asian scripts) may decompose into multiple byte tokens unless adequately represented in the merge table.
 
-**Byte-level Fallback** (SentencePiece):
-- Normally uses Unigram/BPE; falls back to byte representation for OOV characters
-- LLaMA 3 uses this approach
+**Byte-Level Fallback** (SentencePiece):
+- Retains standard character-level or subword merges for common tokens, but routes rare and unseen characters to individual byte tokens rather than `<unk>`.
+- Adopted by LLaMA 3 and Mistral.
 
-**Pure byte models** ([ByT5](https://arxiv.org/abs/2105.13626)):
-- No tokenizer at all — directly inputs UTF-8 bytes
-- Advantage: zero preprocessing, extremely robust
-- Disadvantage: sequence length increases 3-4x, high computational cost
+**Pure Byte Models** ([ByT5](https://arxiv.org/abs/2105.13626)):
+- Operates directly over raw UTF-8 byte streams without subword vocabulary extraction.
+- Advantage: Zero preprocessing pipeline, robust against character noise and typographic perturbations.
+- Disadvantage: Expands sequence length by 3x to 4x, imposing significant attention and memory overhead.
 
-## 1.4 Hands-On: Training Your Own Tokenizer
+## 1.4 Hands-On: Training a Custom BPE Tokenizer
 
 ```python
-# Train a BPE tokenizer with HuggingFace tokenizers library
+# Train a BPE tokenizer using Hugging Face tokenizers
 from tokenizers import Tokenizer
 from tokenizers.models import BPE
 from tokenizers.trainers import BpeTrainer
@@ -131,63 +131,63 @@ trainer = BpeTrainer(
     show_progress=True,
 )
 
-# Train from files
+# Train from corpus files
 tokenizer.train(files=["corpus.txt"], trainer=trainer)
 tokenizer.save("my_tokenizer.json")
 
-# Test
+# Test encoding and decoding
 output = tokenizer.encode("Hello, 世界!")
 print(output.tokens)
 print(output.ids)
 ```
 
-> Libraries: [huggingface/tokenizers](https://github.com/huggingface/tokenizers) | Minimal implementation: [karpathy/minbpe](https://github.com/karpathy/minbpe)
+> Production libraries: [huggingface/tokenizers](https://github.com/huggingface/tokenizers) (Rust-backed) | Pedagogical reference: [karpathy/minbpe](https://github.com/karpathy/minbpe)
 
-**Key decisions**:
-- **Vocabulary size**: 32K-256K. Larger → shorter sequences but larger embedding layer. LLaMA 2 uses 32K, LLaMA 3 uses 128K, GPT-4 uses 100K
-- **Special tokens**: `<bos>`, `<eos>`, `<pad>`, `<unk>`; chat models also need `<|im_start|>`, `<|im_end|>`, etc.
-- **Pre-tokenization**: Use regex to split text into chunks, preventing merges across "natural boundaries" (e.g., digits and letters, punctuation and words)
-- **Normalization**: Whether to apply NFKC Unicode normalization, case folding, etc.
+**Key Architectural Decisions**:
+- **Vocabulary Budget**: Typically 32K to 256K tokens. Larger vocabularies compress text into fewer tokens per sequence (saving attention compute), but enlarge the parameter and memory footprint of input embeddings and output projection heads. LLaMA 2 used 32K; LLaMA 3 scaled to 128K; GPT-4o expanded to 200K.
+- **Special Tokens**: Crucial delimiter tokens including `<bos>`, `<eos>`, `<pad>`, `<unk>`, alongside chat markup tokens like `<|im_start|>` and `<|im_end|>`.
+- **Pre-Tokenization Rules**: Regex rules preventing merges across heterogeneous lexical categories (e.g., isolating digits from letters, and punctuation from alphanumeric strings).
+- **Text Normalization**: Deciding whether to apply NFKC Unicode normalization, lowercase folding, or whitespace collapsing.
 
-## 1.5 Multilingual Tokenizer Design
+## 1.5 Multilingual Tokenizer Optimization
 
-Multilingual is where tokenizer design gets hard:
+Multilingual tokenization presents a distinct set of engineering challenges:
 
-**The problem**: when training data is mostly English, BPE merges skew toward English. A Chinese character may take 3-4 tokens (UTF-8 bytes), while an English word takes one — so the effective context window for Chinese is roughly a third of what it is for English.
+**The Compression Disparity Problem**: When pretraining datasets are dominated by English text, BPE merges naturally prioritize English subwords. Consequently, a single Chinese or Arabic character may decompose into 2 to 4 byte tokens, whereas a complete English word requires only a single token. This token inflation effectively degrades the usable context window and increases inference costs for non-Latin languages.
 
-**Solutions**:
-1. **Balanced training corpus**: Sample by language to ensure each language has sufficient data for merges
-2. **Larger vocabulary**: LLaMA 3 went from 32K→128K, dramatically improving Chinese efficiency
-3. **Language-specific pre-tokenization**: Use jieba/sentencepiece for Chinese word segmentation before running BPE
-4. **Character coverage**: Ensure high-frequency Chinese characters / Japanese kana exist as individual tokens
+**Engineering Mitigations**:
+1. **Stratified Corpus Sampling**: Ensure non-English corpora are sufficiently represented during tokenizer training to allocate adequate merge capacity.
+2. **Vocabulary Expansion**: Scaling vocabulary from 32K (LLaMA 2) to 128K (LLaMA 3) drastically reduces token fertility for non-Latin scripts.
+3. **Domain Pre-Tokenization**: Applying specialized segmentation (e.g., Jieba or SentencePiece) prior to merge extraction.
+4. **Guaranteed Character Coverage**: Ensuring all frequently used CJK ideographs and Arabic/Cyrillic scripts exist as individual atomic tokens.
 
-**Fertility**: tokens-per-word ratio for a given language; the closer to 1, the more efficient. GPT-2 sits at ~3.5 on Chinese; LLaMA 3 brings it down to ~1.5.
+**Fertility**: The average number of tokens required to encode a single word or character in a given language. Ratios approaching 1.0 reflect optimal encoding efficiency. GPT-2 exhibits a fertility rate around 3.5 on Chinese text, whereas modern multilingual tokenizers reduce this figure below 1.5.
 
-## 1.6 SOTA Tokenizer Techniques
+## 1.6 Modern Tokenization Techniques
 
-- **Token Healing** ([guidance](https://github.com/guidance-ai/guidance)): Fixes prompt boundary issues caused by the tokenizer during generation
-- **Byte Fallback**: SentencePiece's `byte_fallback=True` — OOV falls back to bytes
-- **Split digits**: Split numbers into individual digit tokens (`2024` → `2` `0` `2` `4`) to improve math ability
-- **Whitespace handling**: Preserve leading spaces as part of the token (GPT style) vs separate tokens
-- **Code tokens**: Preserve indentation (tabs, multiple spaces) as special tokens to improve code generation
+- **Token Healing** ([guidance](https://github.com/guidance-ai/guidance)): Resolves prompt boundary bias caused by tokenizer greedy prefix matching during autoregressive continuation.
+- **Byte Fallback**: SentencePiece `byte_fallback=True`, routing unmapped characters to raw byte tokens rather than generic `<unk>` placeholders.
+- **Digit Splitting**: Splitting numerical values into individual isolated digit tokens (`2024` $\to$ `2` `0` `2` `4`), preventing arbitrary number chunking and improving arithmetic reasoning.
+- **Whitespace Preservation**: Preserving leading and trailing whitespace within tokens to retain exact indentation for programming language understanding.
+- **Code Indentation Tokens**: Dedicated multi-space and tab tokens to compress Python and YAML indentation levels efficiently.
 
 ## Key Papers
 
-- [Sennrich et al. (2016) — Neural Machine Translation of Rare Words with Subword Units](https://arxiv.org/abs/1508.07909) — the BPE landmark for NMT
-- [Kudo & Richardson (2018) — SentencePiece](https://arxiv.org/abs/1808.06226) — frees tokenization from whitespace assumptions
-- [Kudo (2018) — Subword Regularization (Unigram LM)](https://arxiv.org/abs/1804.10959) — a probabilistic alternative to BPE
+- [Sennrich et al. (2016): Neural Machine Translation of Rare Words with Subword Units](https://arxiv.org/abs/1508.07909): Foundational paper introducing BPE to neural NLP.
+- [Kudo & Richardson (2018): SentencePiece](https://arxiv.org/abs/1808.06226): Language-independent subword tokenizer eliminating language-specific pre-tokenization.
+- [Kudo (2018): Subword Regularization (Unigram LM)](https://arxiv.org/abs/1804.10959): Probabilistic subword sampling for robust representation learning.
 
 ## Further Reading
 
-- Karpathy — [Let's build the GPT Tokenizer](https://www.youtube.com/watch?v=zduSFxRajkE) — 2-hour walkthrough writing BPE from scratch
-- HuggingFace — [Tokenizers docs](https://huggingface.co/docs/tokenizers) — industrial-strength implementation
-- OpenAI — [tiktoken](https://github.com/openai/tiktoken) — official GPT-family tokenizer
+- Karpathy: [Let's build the GPT Tokenizer](https://www.youtube.com/watch?v=zduSFxRajkE) (Complete first-principles BPE walkthrough).
+- Hugging Face: [Tokenizers Documentation](https://huggingface.co/docs/tokenizers) (High-performance industrial implementation).
+- OpenAI: [tiktoken Repository](https://github.com/openai/tiktoken) (Fast BPE tokenizer used in production GPT models).
 
 ## Exercises
 
-1. **Implement BPE from scratch**: train a 1K-token BPE vocab on a small English corpus (e.g. Shakespeare); compare against the `tokenizers` library.
-2. **Multilingual comparison**: encode the same Chinese passage with the GPT-2 and Llama 3 tokenizers; compare token counts. Convince yourself why Chinese-focused models extend the vocabulary.
-3. **Number handling**: pick text full of digits (dates, prices, phone numbers); compare how the GPT-2 and Qwen tokenizers split them, and reason about which choice helps math.
+1. **BPE from First Principles**: Implement a minimal BPE training loop in pure Python; train a 1,000-token vocabulary on a small corpus (e.g., Shakespeare) and verify outputs against the Hugging Face `tokenizers` library.
+2. **Multilingual Fertility Analysis**: Encode identical parallel passages in English, Chinese, and Arabic using the GPT-2, LLaMA 2, and LLaMA 3 tokenizers. Quantify the compression ratio improvements gained by expanding vocabulary size.
+3. **Numerical Tokenization Inspection**: Compare how different tokenizers (GPT-2 vs. Qwen vs. LLaMA 3) tokenize complex numeric expressions (e.g., dates, floating-point numbers, and mathematical equations), and evaluate how digit splitting affects arithmetic modeling.
 
 ---
 
