@@ -1,5 +1,5 @@
-site_name: LLM 训练工程师完全指南 / The Complete LLM Training Engineer Guide
-site_description: 从 Tokenizer 到 Post-Training，从单卡到万卡集群，从纯文本到多模态。From Tokenizer to Post-Training, from single GPU to 10K-GPU clusters, from text to multimodal.
+site_name: The Complete LLM Training Engineer Guide / LLM 训练工程师完全指南
+site_description: From Tokenizer to Post-Training, from single GPU to 10K-GPU clusters, from text to multimodal. 从 Tokenizer 到 Post-Training，从单卡到万卡集群，从纯文本到多模态。
 site_url: https://yingwang.github.io/llm-tutorial/
 repo_url: https://github.com/yingwang/llm-tutorial
 repo_name: yingwang/llm-tutorial
@@ -11,7 +11,7 @@ use_directory_urls: true
 
 theme:
   name: material
-  language: zh
+  language: en
   features:
     - navigation.tabs
     - navigation.tabs.sticky
@@ -50,12 +50,12 @@ extra:
     - icon: fontawesome/brands/github
       link: https://github.com/yingwang
   alternate:
-    - name: 中文
-      link: /llm-tutorial/
-      lang: zh
     - name: English
-      link: /llm-tutorial/en/
+      link: /llm-tutorial/
       lang: en
+    - name: 中文
+      link: /llm-tutorial/zh/
+      lang: zh
 
 markdown_extensions:
   - admonition
@@ -66,7 +66,7 @@ markdown_extensions:
   - mdx_truly_sane_lists
   - toc:
       permalink: true
-      permalink_title: 链接到此节
+      permalink_title: Link to this section
   - pymdownx.arithmatex:
       generic: true
   - pymdownx.details
@@ -102,24 +102,8 @@ plugins:
         - zh
 
 nav:
-  - 中文:
-    - 首页: README.md
-    - 术语表: chapters/00-glossary.md
-    - 第 1 章 — Tokenizer: chapters/01-tokenizer.md
-    - 第 2 章 — 模型架构: chapters/02-architecture.md
-    - 第 3 章 — 预训练: chapters/03-pretraining.md
-    - 第 4 章 — 后训练: chapters/04-post-training.md
-    - 第 5 章 — PEFT: chapters/05-peft.md
-    - 第 6 章 — 训练基础设施: chapters/06-infra.md
-    - 第 7 章 — 推理与部署: chapters/07-inference.md
-    - 第 8 章 — Embedding 与 RAG: chapters/08-embedding-rag.md
-    - 第 9 章 — 多模态: chapters/09-multimodal.md
-    - 第 10 章 — 安全与对齐: chapters/10-safety-alignment.md
-    - 第 11 章 — SOTA 模型: chapters/11-sota-models.md
-    - 第 12 章 — 蒸馏与合并: chapters/12-distillation-merging.md
-    - 第 13 章 — 实战路线图: chapters/13-roadmap.md
   - English:
-    - Home: en/README.md
+    - Home: index.md
     - Glossary: en/00-glossary.md
     - Ch. 1 — Tokenizer: en/01-tokenizer.md
     - Ch. 2 — Architecture: en/02-architecture.md
@@ -134,6 +118,22 @@ nav:
     - Ch. 11 — SOTA Models: en/11-sota-models.md
     - Ch. 12 — Distillation & Merging: en/12-distillation-merging.md
     - Ch. 13 — Practical Roadmap: en/13-roadmap.md
+  - 中文:
+    - 首页: zh.md
+    - 术语表: chapters/00-glossary.md
+    - 第 1 章 — Tokenizer: chapters/01-tokenizer.md
+    - 第 2 章 — 模型架构: chapters/02-architecture.md
+    - 第 3 章 — 预训练: chapters/03-pretraining.md
+    - 第 4 章 — 后训练: chapters/04-post-training.md
+    - 第 5 章 — PEFT: chapters/05-peft.md
+    - 第 6 章 — 训练基础设施: chapters/06-infra.md
+    - 第 7 章 — 推理与部署: chapters/07-inference.md
+    - 第 8 章 — Embedding 与 RAG: chapters/08-embedding-rag.md
+    - 第 9 章 — 多模态: chapters/09-multimodal.md
+    - 第 10 章 — 安全与对齐: chapters/10-safety-alignment.md
+    - 第 11 章 — SOTA 模型: chapters/11-sota-models.md
+    - 第 12 章 — 蒸馏与合并: chapters/12-distillation-merging.md
+    - 第 13 章 — 实战路线图: chapters/13-roadmap.md
 
 copyright: |
   Copyright &copy; 2026 Ying Wang —

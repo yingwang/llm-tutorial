@@ -23,8 +23,8 @@ KV cache 单请求占用 ≈ 2 × 80 × 8 × 128 × 131072 × 2 Byte ≈ 42.95 G
 在 Decode 阶段，单步生成只输入一个 token，矩阵乘法退化为矩阵向量乘（GEMV）。此时算力利用率（Arithmetic Intensity）极低，计算核心大部分时间在等待显存向计算单元搬运权重与 KV 缓存。这就是大模型推理所面临的“显存墙”挑战。
 
 **KV Cache 显存优化范式**:
-- **GQA（分组查询注意力）**: 缩减 KV 头数，直接降低显存占用与带宽读取开销（[见第二章](02-architecture.md#231-gqa-grouped-query-attention)）。
-- **MLA（多头潜在注意力）**: 将高维 KV 投影至低维潜在流形中压缩存储，解码时动态投影还原，显存占用降低达 90% 以上（[见第二章](02-architecture.md#233-mla-multi-head-latent-attention)）。
+- **GQA（分组查询注意力）**: 缩减 KV 头数，直接降低显存占用与带宽读取开销（[见第二章](02-architecture.md#231-grouped-query-attention-gqa)）。
+- **MLA（多头潜在注意力）**: 将高维 KV 投影至低维潜在流形中压缩存储，解码时动态投影还原，显存占用降低达 90% 以上（[见第二章](02-architecture.md#233-multi-head-latent-attention-mla)）。
 - **PagedAttention（分页注意力）**: 借鉴操作系统虚拟内存分页机制，将连续的 KV Cache 离散分配在非连续物理块中，彻底消除内部显存碎片（[vLLM](https://github.com/vllm-project/vllm)）。
 - **KV Cache 量化**: 将动态生成的 KV Cache 由 FP16/BF16 压缩至 INT8 或 FP8 格式存储，显存消耗减半且保持极高精度。
 
