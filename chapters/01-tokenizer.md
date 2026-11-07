@@ -1,39 +1,39 @@
 [← 目录](../README.md) | [下一章 →](02-architecture.md)
 
-# 第一章：分词器 (Tokenizer)
+# 第一章：Tokenizer
 
-分词器（Tokenizer）构成了大语言模型与离散文本交互的第一道门户：它将连续的字符流切分并映射为模型可计算的 Token ID 序列。分词器的构造机制不仅决定了模型的词汇覆盖边界与有效序列长度，更在深层次上制约着多语言表征迁移、数学符号推理以及端到端训练与推理的计算效率。
+分词器（Tokenizer）是大语言模型处理文本的第一步，负责把原始字符串切分成子词片段，再映射为模型可以计算的 Token ID 序列。词表怎么建、文本怎么切，直接关系到同一段话会占多少个 Token，也会影响多语言压缩率、数学与代码的处理效果，以及训练和推理的计算开销。
 
-## 1.1 为什么需要分词表征
+## 1.1 为什么需要 Tokenizer
 
-深度神经网络的底层算子仅能运算连续数值张量，无法直接吞吐离散字符串。若直接采用字符级（Character-level）表征：
-- 序列长度急剧膨胀，致使自注意力算子的 $\mathcal{O}(n^2)$ 计算与显存开销不堪重负；
-- 单字符缺乏独立的语义信息密度，迫使模型在底层耗费大量表征容量自底向上重构词素边界。
+神经网络只能对数值张量做矩阵运算，不能直接接收字符串。要把文本变成数字序列，最简单的做法是按字符切分（Character-level），每个字符对应一个 Token，但这会带来两个明显的问题：
+- 序列会被拉得非常长，一句话就要占几十上百个 Token，自注意力层 $\mathcal{O}(n^2)$ 的计算和显存开销会迅速变得难以承受；
+- 单个字符本身几乎不带完整的语义信息，模型得在浅层额外花不少容量去拼凑词的边界。
 
-反之，若走向词级（Word-level）表征的另一极端：
-- 词表规模将因屈折变化、复合派生词与专业术语而产生维度灾难；
-- 面对未登录词（Out-of-Vocabulary, OOV）时表征能力彻底失效；
-- 对于汉语、日语等缺乏天然空格分界符的表意语言体系，难以构建统一的词法边界。
+另一个极端是按完整的词切分（Word-level），每个单词对应一个 Token，同样行不通：
+- 词表会急剧膨胀，仅英语里的词形变化、派生词和专有名词就能把词表撑到几十万以上；
+- 推理时只要遇到训练没见过的生词（Out-of-Vocabulary, OOV），模型就只能退化成统一的 `<unk>`，丢失具体信息；
+- 中文、日文这类书写时没有空格分隔的语言，很难事先定出统一的词边界。
 
-子词分词（Subword Tokenization）在二者之间取得了优美的平衡：它将高频词固化为独立语义单元，将低频词与生僻词解构为更基础的子词片段，兼顾了表征紧凑性与开集词汇的无限覆盖能力。
+因此，现代大模型普遍采用子词分词（Subword Tokenization）作为折中方案：常见的高频词直接保留为完整的 Token，低频词或生词则拆成更小的词根、词缀甚至字节片段。这样既控制住了词表规模，又不会因为生词丢信息。
 
 ## 1.2 核心算法
 
 ### 1.2.1 BPE (Byte Pair Encoding)
 
-**核心原理**：从基础字符或单字节集合起步，通过贪心统计与迭代合并语料中出现频率最高的相邻 Token 对，直至词表达到预设容量。
+**原理**：从单字符（或单字节）组成的基础词表出发，统计语料里所有相邻 Token 对的出现频次，每次把出现最多的一对合并成新 Token，如此反复，直到词表达到预设大小。
 
-**算法流程**：
+**训练过程**：
 ```
-初始词表: 所有基础单字符集合（或 0-255 基础字节）
-迭代循环:
-    1. 统计当前语料库中所有相邻 Token 对的共现频次
-    2. 选取共现频次最高的一对 (t_i, t_j) 融合成新 Token t_new
-    3. 全局更新语料库中的 Token 序列
-    4. 当词表规模达到目标阈值时终止迭代
+初始词表: 所有单字符（或字节 0-255）
+循环:
+    1. 统计所有相邻 token pair 的频率
+    2. 合并频率最高的 pair → 新 token
+    3. 更新语料中的 token 序列
+    4. 词表大小达到目标 → 停止
 ```
 
-**示例推演**：
+**举例**：
 ```
 语料: "low lower lowest"
 初始: ['l','o','w',' ','l','o','w','e','r',' ','l','o','w','e','s','t']
@@ -43,10 +43,10 @@
 ...
 ```
 
-**现代字节级 BPE**：OpenAI 的 [tiktoken](https://github.com/openai/tiktoken) 在经典 BPE 基础上进行了关键工业级革新：
-- 直接以 UTF-8 原始字节为基底，天然具备对任意未知语言与特殊二进制字符的零 OOV 编码能力；
-- 引入严密的正则表达式预分词（Pre-tokenization），在语法边界（如字母与标点、数字序列）预先切分，阻断跨语义块的错误合并；
-- GPT-4 所采用的 `cl100k_base` 词表规模约达 100,000 个 Token。
+**GPT 系列的 BPE**：OpenAI 的 [tiktoken](https://github.com/openai/tiktoken) 在字节级 BPE 上做了几项关键的工程改进：
+- 直接以 UTF-8 字节（0–255）为基础单元，而不是 Unicode 字符，任何语言和特殊符号都能编码，不会出现 OOV；
+- 先用正则表达式做预分词（Pre-tokenization），按空格、标点、数字和字母边界把文本切成小块，再在块内跑 BPE，防止把单词和后面的标点硬拼成一个 Token；
+- GPT-4 使用的 `cl100k_base` 词表包含约 100K 个 Token。
 
 ```python
 # tiktoken 使用
@@ -59,59 +59,60 @@ print(enc.decode(tokens))  # "Hello, world!"
 
 ### 1.2.2 WordPiece
 
-**核心原理**：与 BPE 的自底向上贪心合并机制类似，但合并准则从单纯的频次统计演进为最大化训练语料在单变量语言模型下的似然增益。
+**原理**：同样是自底向上合并相邻子词，但合并标准和 BPE 不同。BPE 只看哪个组合出现次数最多，而 WordPiece 选择合并后能让语料在语言模型下的似然概率提升最大的一对。
 
-**打分公式**：选择使得互信息（PMI）最大化的子词对 $(x, y) \to xy$ 进行合并：
+**公式**：每次选择合并 $(x, y) \to xy$，使下面的分数最高：
 ```
 score(x, y) = freq(xy) / (freq(x) × freq(y))
 ```
 
-点互信息（Pointwise Mutual Information）从统计学角度度量了两个子词片段在语料中的非随机绑定强度：得分越高，说明二者的结合越具结构特异性而非偶然共现。
+这个比值对应的就是点互信息（Pointwise Mutual Information, PMI）。如果 $x$ 和 $y$ 各自到处出现、只是碰巧挨在一起，分母就会很大，得分并不高；只有当 $x$ 和 $y$ 总是结伴出现时，它们才会被优先合并。
 
-**工程代表**：BERT 与 DistilBERT。词表内部采用 `##` 前缀显式标识子词的续接状态（例如 `playing` 拆解为 `play` + `##ing`）。
+**代表模型**：BERT、DistilBERT 等。词表里会用 `##` 前缀标记词中或词尾的子词片段（例如 `playing` 会切分成 `play` + `##ing`）。
 
 ### 1.2.3 Unigram (SentencePiece)
 
-**核心原理**：与 BPE 的自底向上合并相反，Unigram 采用自顶向下的剪枝策略：预先构建一个过饱和的庞大候选子词库，随后通过期望最大化（EM）算法逐步裁剪掉对语料总似然贡献最小的 Token，直至收缩至预设词表规模。
+**原理**：走的是自顶向下的删减路线。先准备一个非常大的初始候选词表，然后每次评估删掉某个 Token 后语料整体似然概率会下降多少，把影响最小的一批 Token 删掉，逐步缩减到目标词表大小。
 
-**算法流程**：
+**训练过程**：
 ```
-1. 初始化: 提取语料中所有高频子串与基础字符构建超大初始词表（如 100 万词条）
-2. 运行 EM 算法估计当前词表中每个子词的先验概率 P(token)
-3. 评估损失增量: 计算剔除各 Token 后语料对数似然（Log-Likelihood）的下降幅度
-4. 批量裁剪对总似然损失影响最小的 10%–20% 候选 Token
-5. 重复步骤 2–4 直至词表收敛至目标尺寸
+1. 初始化: 用所有高频子串 + 单字符构建大词表 (如 100万)
+2. 用 EM 算法估计每个 token 的概率 P(token)
+3. 计算每个 token 的 loss 贡献: 如果去掉它，语料的 log-likelihood 下降多少
+4. 删掉 loss 贡献最小的 10-20% token
+5. 重复 2-4 直到词表大小达到目标
 ```
 
-**概率化优势**：Unigram 分词天然基于概率图输出 $N$-best 分词切分或进行分词采样（Subword Regularization），能够在训练阶段为模型注入输入扰动，提升鲁棒性。
+**优势**：由于每个 Token 都有对应的概率，Unigram 不仅可以给出最优切分，还能按概率采样出多种切分结果（Subword Regularization），在训练时起到类似数据增强的作用。
 
-**工程代表**：T5、LLaMA、Gemma 等模型均深度依赖 [SentencePiece](https://github.com/google/sentencepiece) 的 Unigram 模式。
+**代表模型**：T5、LLaMA、Gemma 等都使用了 [SentencePiece](https://github.com/google/sentencepiece) 工具包中的 Unigram 或 BPE 实现。
 
-### 1.2.4 算法特性对比
+### 1.2.4 对比
 
 | 特征 | BPE | WordPiece | Unigram |
 |------|-----|-----------|---------|
-| 构词方向 | 自底向上贪心合并 | 自底向上贪心合并 | 自顶向下概率剪枝 |
-| 合并/剪枝准则 | 共现频次 | 似然增益 / PMI | 语料总似然贡献 (EM) |
-| 确定性 | 确定性切分 | 确定性切分 | 概率化分布 (支持正则化采样) |
+| 方向 | 自底向上合并 | 自底向上合并 | 自顶向下删减 |
+| 合并/删减标准 | 共现频率 | Likelihood / PMI | Likelihood (EM) |
+| 确定性 | 确定 | 确定 | 概率化 (可采样) |
 | 代表模型 | GPT 系列, LLaMA 2 | BERT | T5, LLaMA 3, Gemma |
 
 ## 1.3 字节级 vs 字符级
 
-**Byte-level BPE** (GPT-2/3/4, LLaMA)：
-- 以 UTF-8 基础字节（0–255）为原子表征起点，彻底消除 OOV 困境；
-- 缺陷在于对非 ASCII 字符（如中文单个汉字通常占 3 个字节）产生更细碎的初始切分，拉长输入序列。
+**Byte-level BPE**（GPT-2/3/4, LLaMA）：
+- 基础单元是 UTF-8 字节（0–255），而不是 Unicode 字符；
+- 好处是基础词表固定只有 256 项，任何字节序列都能编码，永远不会遇到 OOV；
+- 代价是对非 ASCII 字符不够紧凑，比如一个生僻汉字在 UTF-8 里占 3 个字节，如果没有被合并进词表，就会拆成 3 个独立的字节 Token。
 
-**Byte-level Fallback** (SentencePiece)：
-- 常规分词走 Unigram 或 BPE 路径，仅在遭遇未登记字符时动态回退至 UTF-8 原始字节序列；
-- LLaMA 3 融合了这一设计以确保对生僻符号的绝对兜底。
+**Byte-level Fallback**（SentencePiece）：
+- 平时按字符级 Unigram 或 BPE 正常切分，只有遇到词表里没有的生僻字符时，才回退成 UTF-8 字节表示；
+- LLaMA 3 等模型采用了这种机制，兼顾常见字符的切分效率与生僻字符的兜底能力。
 
-**纯字节模型** ([ByT5](https://arxiv.org/abs/2105.13626))：
-- 完全摒弃分词器预处理，端到端直接吞吐原始 UTF-8 字节流；
-- 优势在于具备极致的噪声鲁棒性与跨语言统一性；
-- 劣势在于序列长度剧增 3 至 4 倍，大幅加重自注意力计算的二次方负担。
+**纯字节模型**（[ByT5](https://arxiv.org/abs/2105.13626)）：
+- 完全去掉分词器，直接把原始 UTF-8 字节序列喂给模型；
+- 好处是不需要任何文本预处理，对拼写错误和噪声非常稳健；
+- 代价是同样的文本序列长度会拉长 3 到 4 倍，训练和推理的计算开销明显增加。
 
-## 1.4 实战：训练专有分词器
+## 1.4 实战：训练你自己的 Tokenizer
 
 ```python
 # 用 HuggingFace tokenizers 库训练 BPE tokenizer
@@ -140,55 +141,53 @@ print(output.tokens)
 print(output.ids)
 ```
 
-> 工业级核心库：[huggingface/tokenizers](https://github.com/huggingface/tokenizers)；教学极简实现：[karpathy/minbpe](https://github.com/karpathy/minbpe)
+> 常用库：[huggingface/tokenizers](https://github.com/huggingface/tokenizers) | 极简教学实现：[karpathy/minbpe](https://github.com/karpathy/minbpe)
 
-**关键工程决策**：
-- **词表容量权衡**：通常在 32K 至 256K 之间。词表越大，文本压缩率越高（序列越短），但输入 Embedding 与输出 LM Head 的参数量和显存开销随之线性剧增。LLaMA 2 设定为 32K，LLaMA 3 扩充至 128K，GPT-4 采用约 100K；
-- **特殊 Token 拓扑**：精确规划 `<bos>`、`<eos>`、`<pad>`、`<unk>` 以及对话结构标识符（如 `<|im_start|>`、`<|im_end|>`）；
-- **预分词规则（Regex Pre-tokenization）**：设计高效正则表达式隔离自然语义分界（如标点、连续数字、字母缩写），防止有害的跨类型子词合并；
-- **文本正则化**：权衡是否施加 NFKC Unicode 归一化或大小写折叠。
+**关键决策**：
+- **词表大小**：通常选在 32K 到 256K 之间。词表越大，同样的文本切出来的序列越短，但输入 Embedding 层和输出 LM Head 的参数量与显存占用也会跟着变大。LLaMA 2 用 32K，LLaMA 3 扩充到了 128K，GPT-4 约为 100K。
+- **特殊 Token**：除了基础的 `<bos>`、`<eos>`、`<pad>`、`<unk>`，对话模型还需要预留 `<|im_start|>`、`<|im_end|>` 等控制标记。
+- **预分词**：通过正则把文本先按自然边界切开，防止数字和字母、单词和标点符号跨边界合并不该合并的片段。
+- **规范化**：决定是否在分词前做 NFKC 等 Unicode 归一化或大小写转换（现代大模型为了保留原始文本与代码格式，通常不做破坏性的归一化）。
 
-## 1.5 多语言分词器设计
+## 1.5 多语言 Tokenizer 设计
 
-在跨语言场景下，分词器设计面临显著的表征失衡挑战：
+做多语言模型时，分词器很容易出现语种之间的效率失衡：
 
-**语言不均问题**：若训练数据中英语占据绝对主导，BPE 算法将优先将高频英文词组压缩为单一 Token；而中文等表意文字由于单字对应 3 字节 UTF-8 编码且缺乏足够的合并频次，往往退化为单字甚至按字节拆分（一个汉字消耗 2 至 3 个 Token）。这导致中文输入的有效上下文窗口被严重压缩至英文的数分之一。
+**问题**：如果训练分词器的语料以英文为主，BPE 的合并名额就会大量分给英文词根和单词。一个英文单词通常只占 1 个 Token，而中文由于 UTF-8 编码一个字占 3 个字节，又没分到多少合并名额，一个汉字往往要被切成 2 到 3 个 Token。这样一来，同样长的上下文窗口，中文能装下的实际内容只有英文的三分之一左右，生成速度也变慢。
 
-**工业级优化策略**：
-1. **平衡采样语料**：在分词器训练阶段对多语言语料实施温度加权采样，确保低资源语言的高频词素获得充分合并机会；
-2. **扩充词表容量**：LLaMA 3 将词表从 32K 跨越式增至 128K，直接使中文与多语言的压缩率提升数倍；
-3. **语言特异性预分词**：对中文等无空格语言引入结巴分词或字词切分前处理，阻断无意义的字边界交错；
-4. **高频字符硬覆盖**：强制将常用汉字、日文假名及各语言基础文字作为不可分割的独立单元纳入基础词表。
+**解决方案**：
+1. **平衡训练语料**：训练分词器时按语种调整采样比例，给低资源语言和非拉丁语系留出足够的合并机会；
+2. **扩大词表**：LLaMA 3 把词表从 32K 扩大到 128K，多出来的名额容纳了大量多语言常见词与汉字，中文编码效率明显改善；
+3. **语言特定预分词**：针对中文等无空格语言，先用分词工具或正则规则切分，避免跨词边界乱合；
+4. **字符覆盖**：设置较高的 `character_coverage`（如 0.9995），保证常用汉字、日文假名等直接作为独立 Token 收入词表。
 
-**Fertility 指标**：用于量化分词器在特定语言上的压缩效率：
-$$\text{Fertility} = \frac{\text{Tokens 数量}}{\text{Words/Characters 数量}}$$
-Fertility 越趋近于 1，表明分词表征越紧凑。GPT-2 对中文的 Fertility 高达约 3.5，而经过充分多语言扩表优化的 LLaMA 3 已降至约 1.5。
+**Fertility 指标**：用来衡量分词器对某种语言的压缩效率，定义为 `fertility = tokens / words`（中文常按字或词统计），数值越接近 1 说明切分越紧凑。GPT-2 对中文的 Fertility 大约是 3.5，而 LLaMA 3 降到了 1.5 左右。
 
-## 1.6 前沿 SOTA 分词技巧
+## 1.6 SOTA Tokenizer 技巧
 
-- **Token Healing** ([guidance](https://github.com/guidance-ai/guidance))：消除自回归解码时由于 Prompt 尾部空格与贪心分词边界不匹配造成的表征偏置；
-- **Byte Fallback**：启用 SentencePiece 的 `byte_fallback=True`，在遭遇生僻 Unicode 字符时平滑降级至单字节序列；
-- **数字按位拆分 (Split Digits)**：强制将多位数字解构为单数字 Token（例如 `2024` 切分为 `2` `0` `2` `4`），避免大数字组合爆炸并显著增强数学运算与数值推理的一致性；
-- **前导空格归一 (Whitespace Handling)**：保留前导空格作为子词前缀（GPT 风格）还是拆分为独立空格 Token；
-- **代码缩进与排版专用 Token**：为连续制表符（Tab）或特定数量空格预置专用 Token，有效压缩代码文件的有效上下文长度并提升代码生成质量。
+- **Token Healing**（[guidance](https://github.com/guidance-ai/guidance)）：在生成阶段自动回退并重切 Prompt 末尾的边界 Token，修补因末尾空格或半个词引起的贪心分词偏差。
+- **Byte Fallback**：开启 SentencePiece 的 `byte_fallback=True`，遇到未登录字符时自动拆成 UTF-8 字节，避免产生 `<unk>`。
+- **Split digits**：把多位数字按位拆成独立的单数字 Token（如 `2024` 切成 `2` `0` `2` `4`），避免同一个数字因为切分方式不一致而干扰算术推理。
+- **Whitespace handling**：把前导空格并入词首作为子词的一部分（GPT 风格，如 `Ġworld`），或者把空格当成独立 Token 处理。
+- **Code tokens**：把连续多个空格、缩进和制表符（Tab）合并成专门的单个 Token，大幅缩短 Python 等代码的 Token 序列长度。
 
-## 经典文献
+## 关键论文
 
-- [Sennrich et al. (2016) — Neural Machine Translation of Rare Words with Subword Units](https://arxiv.org/abs/1508.07909)：子词 BPE 在神经机器翻译中的奠基之作
-- [Kudo & Richardson (2018) — SentencePiece](https://arxiv.org/abs/1808.06226)：将分词表征从语言特定空格依赖中彻底解放的通用框架
-- [Kudo (2018) — Subword Regularization (Unigram LM)](https://arxiv.org/abs/1804.10959)：提出基于概率图采样的子词正则化方法
+- [Sennrich et al. (2016): Neural Machine Translation of Rare Words with Subword Units](https://arxiv.org/abs/1508.07909)：把 BPE 引入神经机器翻译的经典工作
+- [Kudo & Richardson (2018): SentencePiece](https://arxiv.org/abs/1808.06226)：摆脱空格预分词依赖的通用分词工具
+- [Kudo (2018): Subword Regularization (Unigram LM)](https://arxiv.org/abs/1804.10959)：基于 Unigram 概率模型的子词采样与正则化方法
 
-## 进阶参考
+## 进一步阅读
 
-- Andrej Karpathy：[Let's build the GPT Tokenizer](https://www.youtube.com/watch?v=zduSFxRajkE)（从底层逻辑推演并手写 BPE 的经典解析）
-- HuggingFace：[Tokenizers 官方文档](https://huggingface.co/docs/tokenizers)（工业级 Rust 高性能分词流水线指南）
-- OpenAI：[tiktoken 仓库](https://github.com/openai/tiktoken)（GPT 系列官方极速分词实现）
+- Karpathy：[Let's build the GPT Tokenizer](https://www.youtube.com/watch?v=zduSFxRajkE)，从零手写 BPE 分词器的两小时实战视频
+- HuggingFace：[Tokenizers 文档](https://huggingface.co/docs/tokenizers)，Rust 编写的高性能分词库说明
+- OpenAI：[tiktoken](https://github.com/openai/tiktoken)，GPT 系列官方开源的字节级 BPE 实现
 
-## 实践训练
+## 练习题
 
-1. **从零实现 BPE 算法**：在纯文本微型语料上手写 BPE 训练逻辑（构建 1K 容量词表），并将分词切分结果与 HuggingFace `tokenizers` 工业实现进行一致性对比。
-2. **多语言表征压缩率分析**：使用 GPT-2、LLaMA 2 与 LLaMA 3 的分词器分别编码同一段技术性中文语料，统计 Token 生成总量与 Fertility 指标，深入理解词表扩充对上下文承载力的物理意义。
-3. **数字分词机制与数学推理相关性探究**：选取包含长数字、时间戳与浮点算式的文本，对比分析 GPT-2 贪心合并策略与 Qwen 独立数字切分策略在词法结构上的异同。
+1. **从零实现 BPE**：在英文小语料（如莎士比亚全集）上手写训练一个 1K 词表的 BPE 分词器，并与 `tokenizers` 库的切分结果做对比。
+2. **多语言对比**：分别用 GPT-2、LLaMA 2 和 LLaMA 3 的 Tokenizer 编码同一段中文技术文章，统计各自的 Token 数量，算一下词表扩充对上下文窗口利用率的实际影响。
+3. **数字处理**：找一段包含年份、价格、电话号码和算式的文本，对比 GPT-2 与 Qwen/LLaMA 3 的 Tokenizer 分别怎么切分数字，看看按位切分对加减法对齐有什么帮助。
 
 ---
 

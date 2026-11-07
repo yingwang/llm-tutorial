@@ -1,219 +1,262 @@
 [← 上一章](08-embedding-rag.md) | [目录](../README.md) | [下一章 →](10-safety-alignment.md)
 
----
+# 第九章：多模态大模型（Multimodal LLMs）
 
-# 第九章：多模态大模型 (Multimodal LLMs)
+纯文本大模型只能处理离散的文字 token，而图像、音频、视频都是连续的信号。要把这些信号接进大模型，核心问题只有两个：怎么把图像或声音编码成模型能读懂的向量序列，以及怎么用自回归或扩散过程把这些模态生成出来。本章依次介绍视觉语言模型（VLM）、图像生成、语音建模、视频理解与生成，以及端到端全模态（Omni）模型。
 
-人类对世界的感知天然交织于视觉光影、声音韵律与离散符号之间。从纯文本大模型迈向多模态大模型（Multimodal Foundation Models），不仅是输入维度的拓宽，更是从符号逻辑闭环跃迁至物理世界具身感知的必由之路。本章将系统解析视觉语言模型（VLM）、扩散与自回归图像生成、时空视频建模以及端到端全模态（Omni）系统的底层架构演进与工程实践。
+## 9.1 视觉语言模型（Vision-Language Models, VLMs）
 
-## 9.1 视觉语言模型 (Vision-Language Models, VLMs)
+### 9.1.1 三种架构模式
 
-### 9.1.1 跨模态架构模式
-
-如何将高维连续的像素张量与离散的词元空间有机缝合，是 VLM 架构设计的核心命题。业界演化出三种主流范式：
+把视觉和语言拼在一起，主流有三种做法：
 
 ```
-范式一: 交叉注意力融合 (Cross-Attention Fusion, 如 Flamingo / Claude 3)
-  图像像素 → 视觉编码器 → 视觉 Token 序列
-  文本 Token + 视觉 Token → 门控交叉注意力层 (Gated Cross-Attention) → 语言模型输出
-  
-  核心优势: 视觉特征与语言计算显式解耦，利于保留高分辨率细粒度空间拓扑。
-  工程代价: 需侵入式修改预训练 LLM 内部网络层，推理引擎需定制优化。
+方式一: Cross-Attention 融合 (Flamingo / Llama 3.2 Vision 风格)
+  Image → Vision Encoder → Visual Tokens
+  Text Tokens + Visual Tokens → 插入门控交叉注意力层 (Gated Cross-Attention) → 文本输出
 
-范式二: 早期前置投影融合 (Early Fusion / Prefix Projection, 如 LLaVA / BLIP-2)
-  图像像素 → 视觉编码器 (ViT) → 投影对齐层 (MLP / Resampler) → 视觉 Token 嵌入
-  [视觉 Token 序列] 与 [文本 Token 序列] 在输入端无缝拼接 → 送入标准 Transformer 解码器
-  
-  核心优势: 完整复用现有成熟的开源 LLM 架构与生态基础设施。
-  主要瓶颈: 高分辨率图像展开后占用大量上下文窗口，计算复杂度随图像分辨率呈二次方攀升。
+  优势: 视觉 token 不直接挤占文本的上下文长度，适合高分辨率多图
+  劣势: 需要在 LLM 内部额外插层，改动了标准 Transformer 解码器结构
 
-范式三: 原生统一全模态 (Native Unified Multimodal, 如 Gemini 1.5 / GPT-4o)
-  自预训练之初即在统一 Token 空间中对文本、像素、音频进行混合序列建模。
-  
-  核心优势: 跨模态表征对齐极其深刻，具备原生的多模态生成与长程上下文感知能力。
-  工程代价: 算力开销与多模态数据均衡配比极其严苛，训练稳定性控制极难。
+方式二: Early Fusion 前置拼接 (LLaVA / Qwen-VL / InternVL 风格) ← 开源界最主流
+  Image → Vision Encoder (ViT) → Projector (MLP) → 视觉 Token 嵌入
+  [视觉 Token] 与 [文本 Token] 直接在输入层拼接 → 送入标准 LLM → 文本输出
+
+  优势: 不改 LLM 内部结构，直接复用现成的预训练底座与推理框架 (vLLM/SGLang)
+  劣势: 高分辨率图像会产生几千个视觉 token，大量占用上下文窗口与 KV Cache
+
+方式三: Native Multimodal 原生多模态 (Gemini / GPT-4o 风格)
+  从预训练第一天起，就把文本、图像、音频转成统一的 token 序列混合训练
+
+  优势: 跨模态对齐最深，不仅能看图说话，还能原生输出图像和语音
+  劣势: 从头预训练成本极高，多模态数据配比与训练稳定性很难调
 ```
 
-### 9.1.2 视觉编码器与特征压缩
+### 9.1.2 视觉编码器（Vision Encoder）与 Token 压缩
 
-**主流视觉编码器架构演进**:
-- **CLIP ViT (Vision Transformer)**: 基于数亿图文对进行对比学习预训练，语义抽象度极高，但对局部细微空间坐标和密集文字辨识相对薄弱。
-- **SigLIP (Sigmoid Loss for Language Image Pre-training)**: 采用逐对独立 Sigmoid 损失替代全局 Softmax，训练稳定性与下游零样本分类能力显著提升。
-- **InternViT / DINOv2**: 具备数亿至数十亿参数的巨型视觉基座，利用自监督像素级掩码重建提取丰富的几何与纹理细节。
+开源 VLM 通常拿现成的视觉编码器把图片切成小方格（Patch），编码成一串连续向量：
 
 ```
-图像 (224×224 像素) → 划分为 14×14 图像块 (Patch) → 得到 256 个局部 Patch 嵌入
-→ 穿过 12 至 24 层 ViT 编码器 → 输出 256 个 d 维连续视觉向量
+输入图像 (224×224) → 切成 14×14 的小块 (共 16×16 = 256 个 patches)
+→ 过 12-24 层 ViT Encoder
+→ 得到 256 个 d 维视觉向量 (Visual Tokens)
 ```
 
-**动态高分辨率切片 (Dynamic Resolution / AnyRes)**:
-为避免高分辨率图像强行双线性插值导致的模糊，现代模型（如 LLaVA-NeXT、Qwen2-VL）采用动态网格切分机制：
+常用的视觉编码器基座：
+- **[CLIP](https://arxiv.org/abs/2103.00020) ViT**：用数亿图文对通过对比学习训练出来，擅长抓全局语义，但对密集小字（OCR）和精确位置不太敏感。
+- **SigLIP**：Google 对 CLIP 的改进版，把全局 Softmax 换成逐对独立的 Sigmoid 损失，在小 batch 下也训得稳，是目前开源 VLM（如 LLaVA-OneVision、PaliGemma）最常用的视觉底座。
+- **InternViT / DINOv2**：前者是参数量高达 6B 的大尺寸视觉底座；后者靠自监督学习，空间几何与局部细节还原更好。
+
+**高分辨率处理（Dynamic Resolution / AnyRes）**：
+早期 CLIP 只吃固定的 $224 \times 224$ 或 $336 \times 336$ 方图，遇到长条形网页截图或密密麻麻的 PDF 文档，强行缩放就会糊成一团。现在主流模型采用两种办法：
+1. **动态切块（Tile Splitting，如 LLaVA-NeXT、InternVL）**：按原图长宽比切成多个标准小块（比如 $2 \times 2$ 共 4 块）分别过 ViT，再加上一张缩略图提供全局视野。一张 $672 \times 672$ 的图会变成 $(4+1) \times 256 = 1280$ 个视觉 token。
+2. **原生动态分辨率（Naive Dynamic Resolution，如 Qwen2-VL）**：去掉绝对位置编码，改用 2D-RoPE，直接把任意长宽比的图片按原始分辨率切成 patch 送进 ViT。
+
+**视觉 Token 压缩**：
+分辨率一高，单张图就会产生两三千个 token，传十张图或者一段视频就会撑爆显存。常见压缩手段包括：
+- **Pixel Shuffle / 空间池化**：把相邻 $2 \times 2$ 的 4 个视觉 token 在通道维拼起来再过一层线性投影压成 1 个，token 数直接减少 75%（InternVL、Qwen2-VL 均采用此法）。
+- **Perceiver Resampler / Q-Former**：用固定数量（如 64 个）的可学习查询向量去和视觉特征做交叉注意力，不管原图多大都只抽出 64 个 token。缺点是容易丢掉细碎文字信息。
+
+### 9.1.3 三阶段训练流程
+
+把一个纯文本 LLM 改造成 VLM，通常分三步走：
 
 ```
-输入任意长宽比高分辨率图像 (如 1024×1024):
-1. 保持原图比例切分为 2×2 个标准局部切片 (Tiles) + 1 张全局下采样缩略图。
-2. 每个 Tile 独立经过 ViT 提取特征，生成 4 × 256 = 1024 个局部细粒度 Token。
-3. 结合全局概览 Token 进行拼接，保留微观文字与宏观构图信息。
+Stage 1: 特征对齐预训练 (Feature Alignment)
+  - 冻结 Vision Encoder 和 LLM，只训练中间的 Projector (通常是个两层 MLP)
+  - 数据: 几百万图文对 (LAION, CC3M 等图像描述数据)
+  - 目的: 让 MLP 学会把 ViT 吐出的视觉向量翻译到 LLM 认识的词向量空间里
+
+Stage 2: 视觉指令微调 (Visual Instruction Tuning)
+  - 解冻 LLM + Projector (高分辨率阶段往往连 Vision Encoder 一起解冻)
+  - 数据: 几十万到几百万条高质量视觉问答 (VQA)、OCR 文档解析、图表阅读、多轮图文对话
+  - 目的: 让模型学会看图回答复杂问题、提取表格与推理
+
+Stage 3: 偏好对齐 (DPO / RLHF，可选)
+  - 目的: 重点抑制多模态幻觉 (减少模型顺着文本惯性“脑补”图中根本没有的物体)
 ```
 
-**视觉 Token 压缩与降采样**:
-- **Perceiver Resampler**: 设定固定数量（如 64 个）的可学习查询向量（Latent Queries），通过交叉注意力机制从数千个视觉 Token 中提炼关键特征。
-- **2D 空间平均池化 (Spatial Pooling)**: 将相邻 $2 \times 2$ 的视觉 Token 拼接降采样为 1 个 Token，压缩率达 75%。
-- **Token 动态合并 (Token Merging)**: 在自注意力层根据余弦相似度动态合并冗余的背景 Token。
+### 9.1.4 代表性视觉语言模型
 
-### 9.1.3 三阶段多模态训练流水线
-
-```
-第一阶段: 跨模态特征对齐预训练 (Pre-alignment)
-  - 参数策略: 严格冻结 Vision Encoder 与 LLM 基座，仅微调投影层 (Projector MLP)
-  - 训练数据: 海量弱监督图文对 (如 LAION、CC3M、DataComp 等数千万样本)
-  - 核心目标: 将视觉编码器的潜在空间对齐映射至 LLM 文本词嵌入空间
-
-第二阶段: 视觉指令微调 (Visual Instruction Tuning)
-  - 参数策略: 解冻 LLM 基座，联合微调 Projector 与 LLM (可选解冻 Vision Encoder)
-  - 训练数据: 复杂视觉问答 (VQA)、文档 OCR 解析、科学图表理解、空间定位 (Grounding)
-  - 核心目标: 激发模型理解图像细微细节并遵循复杂推理指令的能力
-
-第三阶段: 多模态偏好对齐与防幻觉强化 (Multimodal RLHF / DPO)
-  - 核心目标: 针对多模态特有的“对象幻觉”（Object Hallucination，凭空捏造图像中不存在的物体）进行惩罚对齐
-```
-
-### 9.1.4 旗舰视觉语言模型一览
-
-| 模型 | 激活规模 | 视觉编码器基座 | 分辨率处理机制 | 核心技术亮点 |
+| 模型 | 参数规模 | 视觉编码器 | 分辨率方案 | 特点 |
 |------|---------|--------------|--------------|-------------|
-| **GPT-4o** | 未公开 | 原生多模态统一基座 | 动态切片投影 | 毫秒级流式响应，综合感知能力顶尖 |
-| **Claude 3.5 Sonnet** | 未公开 | 混合注意力架构 | 细粒度网格采样 | 卓越的图表分析、代码界面还原与文档理解 |
-| **Gemini 1.5 Pro** | MoE 架构 | 原生多模态统一基座 | 原生多模态序列 | 支持 1 小时以上长视频与百万级上下文 |
-| [**LLaVA-OneVision**](https://arxiv.org/abs/2408.03326) | 7B / 72B | SigLIP-SO400M | AnyRes 动态切分 | 开源多模态基线，兼顾单图、多图与视频理解 |
-| [**InternVL 2.5**](https://arxiv.org/abs/2412.05819) | 1B 至 78B | InternViT-6B | 动态高分辨率切片 | 工业级开源视觉 SOTA，中文 OCR 与图表极强 |
-| [**Qwen2-VL**](https://arxiv.org/abs/2409.12191) | 2B / 7B / 72B | 动态分辨率 ViT | 原生动态长宽比 (Naive Dynamic) | 任意分辨率无损输入，支持秒级时空视频定位 |
+| **GPT-4o** | 未公开 | 原生多模态 | 动态切块 | 响应快，综合图文与语音交互能力强 |
+| **Claude 3.5 Sonnet** | 未公开 | 未公开 | 高分辨率采样 | 读图表、看长文档与前端 UI 代码还原极准 |
+| **Gemini 1.5 Pro** | MoE | 原生多模态 | 原生多模态序列 | 1M-2M 上下文，可直接扔进 1 小时视频或整本书 |
+| [**LLaVA-OneVision**](https://arxiv.org/abs/2408.03326) | 0.5B / 7B / 72B | SigLIP-400M | AnyRes 动态切块 | 训练配方与数据完全开源，支持单图、多图与视频 |
+| [**InternVL 2.5**](https://arxiv.org/abs/2412.05819) | 1B - 78B | InternViT-6B | 动态切块 + Pixel Shuffle | 开源多模态综合榜单前列，中文 OCR 表现突出 |
+| [**Qwen2-VL**](https://arxiv.org/abs/2409.12191) | 2B / 7B / 72B | ViT-600M (2D-RoPE) | 原生动态分辨率 | 支持任意长宽比图片输入与长视频理解 |
 
-## 9.2 图像生成与统一多模态生成
+## 9.2 图像生成
 
-### 9.2.1 扩散模型与潜空间流形 (Diffusion & Flow Matching)
+### 9.2.1 扩散模型（Diffusion Models）
 
-图像生成领域历经了从生成对抗网络（GAN）向扩散模型（Diffusion Models）与流匹配（Flow Matching）的深刻演进。
-
-```
-前向加噪过程 (物理扩散): 从真实数据分布 x_0 逐步注入高斯白噪声，经过 T 步退化为纯噪声 x_T
-反向去噪过程 (逆向积分): 训练神经网络 ε_θ(x_t, t, c) 预测所注入的噪声向量，沿得分函数反向求解
-
-优化目标 (Score Matching): 
-  L_diffusion = E_{t, x_0, ε} [ || ε - ε_θ(x_t, t, c) ||² ]
-  (其中 c 为文本提示词的 CLIP / T5 语义编码条件)
-```
-
-**潜在扩散模型 (Latent Diffusion Model, LDM)**:
-在像素空间直接执行数十步迭代去噪的计算复杂度极高。LDM 先利用变分自编码器（VAE）将 $512 \times 512 \times 3$ 的高维像素无损压缩至 $64 \times 64 \times 4$ 的连续潜在流形空间，并在紧凑潜在空间上进行扩散运算，最终由 VAE 解码器重建高清图像。
+扩散模型的思路很直观：前向过程往真实图片里一步步加高斯噪声，直到变成纯雪花噪点；反向过程训练一个神经网络，学会从噪点里一步步把噪声减掉，还原出清晰图像。
 
 ```
-文本 Prompt ──▶ Text Encoder (T5 / CLIP) ──────────────────────┐
-                                                                ▼
-高斯噪声 ──────▶ 潜在空间扩散去噪网络 (U-Net / DiT) ────▶ 潜在特征图 ────▶ VAE Decoder ──▶ 高清图像
+前向过程 (加噪): x_0 → x_1 → ... → x_T (逐步混入高斯噪声 ε)
+反向过程 (去噪): x_T → x_{T-1} → ... → x_0 (模型一步步预测并减去噪声)
+
+训练目标:
+  L = E_{t, x_0, ε} [ || ε - ε_θ(x_t, t, c) ||² ]
+  # ε: 实际加进去的噪声
+  # ε_θ: 模型预测出来的噪声
+  # c: 文本提示词的 Embedding 条件 (来自 CLIP 或 T5)
 ```
 
-### 9.2.2 扩散 Transformer (DiT) 与流匹配架构
-
-传统扩散模型普遍基于卷积 U-Net 结构，参数扩增时容易遭遇容量瓶颈。**DiT (Diffusion Transformer)** ([Peebles & Xie, 2023](https://arxiv.org/abs/2212.09748)) 将潜在空间特征切分为 Patch 序列，以标准 Transformer 作为去噪主体，使得图像生成领域完整继承了 Scaling Law 的算力红利。
-
-| 模型 | 骨干架构 | 核心数学机制 | 典型生成特性 |
-|------|---------|-------------|-------------|
-| [**FLUX.1**](https://github.com/black-forest-labs/flux) | MMDiT (多模态 DiT) | Rectified Flow (直角流匹配) | 极致逼真的人体质感与复杂排版文字生成 |
-| [**Stable Diffusion 3**](https://arxiv.org/abs/2403.03206) | 双流 MMDiT | Flow Matching ODE | 文本与视觉在独立权重流中交叉注意力交互 |
-| **Midjourney v6** | 专有 DiT 体系 | 深度美学对齐 | 艺术表现力与商业构图质感顶尖 |
-| **DALL-E 3** | U-Net 扩散模型 | 深度 Prompt 自动化重写 | 严谨遵从极其复杂的长文本提示词 |
-
-### 9.2.3 自回归图像生成与统一表征范式
-
-大模型领域的另一条探索路径是将图像彻底离散化，使用与语言模型完全一致的自回归（Autoregressive）方式逐词生成图像：
-1. **离散分词化 (Discrete Tokenization)**: 利用 VQ-GAN 或 FSQ（有限标量量化）将图像切块离散映射为码本整数序列（如 $32 \times 32 = 1024$ 个离散 Token）。
-2. **统一自回归预测**: 将文本与图像 Token 混编为长序列，用标准因果掩码交叉熵损失训练单个 Transformer。
-3. **统一混合架构 (Transfusion)** ([Meta, 2024](https://arxiv.org/abs/2408.11039)): 在同一个 Transformer 内部，对文本 Token 采用自回归交叉熵损失，对连续图像 Patch 采用扩散流匹配损失，真正实现了离散与连续模态的端到端融合。
-
-## 9.3 音频与语音建模 (Audio & Speech)
-
-### 9.3.1 语音识别与声学表征 (ASR)
-
-**[Whisper](https://arxiv.org/abs/2212.04356) 架构体系**:
-将连续声学波形转换为对数梅尔频谱图（Log-Mel Spectrogram），通过一维卷积与 Transformer 编码器提取声学特征，再由自回归解码器在特殊控制 Token（如 `<|transcribe|>`, `<|en|>`）引导下输出多语言转录文本。
+**潜在扩散模型（Latent Diffusion，[Rombach et al., 2022](https://arxiv.org/abs/2112.10752)）**：
+直接在 $1024 \times 1024$ 的像素图上跑几十步去噪太慢。Latent Diffusion 先用一个训练好的变分自编码器（VAE）把原图长宽各缩小 8 倍，压到紧凑的潜在空间（Latent Space，例如 $128 \times 128 \times 16$），在里面做完扩散去噪后，最后再用 VAE Decoder 还原回像素图，计算量骤降。
 
 ```
-原始音频波形 ──▶ 80通道 Log-Mel 频谱 ──▶ Conv1D 降采样 ──▶ Transformer Encoder ──▶ 交叉注意力解码 ──▶ 文字序列
+Text Prompt ──▶ Text Encoder (CLIP / T5) ─────────────┐
+                                                      ▼
+随机噪声 ──────▶ Latent Diffusion (U-Net / DiT) ──▶ 去噪后的 Latent ──▶ VAE Decoder ──▶ 生成图像
 ```
 
-### 9.3.2 神经音频编解码与语音合成 (TTS)
+### 9.2.2 从 U-Net 到 DiT 与 Flow Matching
 
-现代高质量零样本语音克隆依赖于神经音频编解码器（Neural Audio Codec，如 EnCodec、SoundStream、DAC）：
-- **残差向量量化 (RVQ)**: 将 24kHz 高保真音频波形压缩为每秒数百个多层离散 Codec Token。
-- **自回归生成 (如 VALL-E)**: 将文本与目标说话人的 3 秒参考提示音频拼接，自回归预测第一层声学 Token，后续层并行生成。
-- **流匹配生成 (如 F5-TTS)**: 基于非自回归 Flow Matching 进行音频梅尔谱去噪重建，生成速度极快且极富自然语调起伏。
+早期的 Stable Diffusion 1.5/XL 用卷积 U-Net 做去噪骨干网。**[DiT（Diffusion Transformer）](https://arxiv.org/abs/2212.09748)** 把 Latent 特征图也切成 Patch 序列，改用标准 Transformer 做去噪网络，发现参数量和计算量往上堆时，生成质量像 LLM 一样平滑提升。
 
-## 9.4 时空视频建模 (Video Intelligence)
+新一代生图模型（如 SD3、FLUX）还把传统的扩散过程升级成了 **Rectified Flow（流匹配，Flow Matching）**：不再走弯弯曲曲的随机微分方程路径，而是在噪声分布和真实图像分布之间拉一条直线路径，训练模型预测直线方向的速度场，只需更少的采样步数就能生成高质量图像。
 
-### 9.4.1 视频理解与长程时序建模
+| 模型 | 架构 | 特点 |
+|------|------|------|
+| [**FLUX.1**](https://github.com/black-forest-labs/flux) | MMDiT + Rectified Flow | 目前开源生图主力，人手结构与图中英文排版文字准确 |
+| [**Stable Diffusion 3**](https://arxiv.org/abs/2403.03206) | MMDiT（图文双流注意力） | 开源，文本分支与图像分支各自保留独立权重并做联合注意力 |
+| **Midjourney v6** | 未公开 | 审美调教与构图光影质感突出 |
+| **DALL-E 3** | Diffusion + LLM 改写 | 先用 GPT-4 把用户的简短提示词扩写成详细画面描述，生图听话度高 |
+| **Imagen 3** | Diffusion | Google 出品，写实细节与文字渲染扎实 |
 
-视频由多帧图像序列构成，兼具二维空间几何与一维时间运动维度。
-- **时空解耦注意力 (Factorized Spatial-Temporal Attention)**: 在空间层内执行单帧内注意力，在时间层内沿同一空间位置的时序序列执行时间注意力，计算复杂度大幅低于全时空 3D 注意力。
-- **动态抽帧与长上下文 (Gemini / Qwen2-VL)**: 针对长视频按 1-2 FPS 动态采样，结合 3D Patch 编码与超长上下文机制（1M+ tokens），实现小时级长视频的精确定位与情节理解。
+### 9.2.3 自回归图像生成与统一模型
 
-### 9.4.2 视频生成前沿与物理世界模拟
-
-视频生成是物理世界动力学模拟的初级形态。模型必须在保持单帧高保真图像质量的同时，严格保证帧间运动的一致性与因果连续性。
-
-```
-文本/参考图条件 ──▶ 3D 潜在空间时空 DiT (Spatial-Temporal DiT) ──▶ 3D VAE 解码器 ──▶ 连贯视频帧流
-```
-
-**代表性工业 SOTA 系统**:
-- **Sora (OpenAI)**: 采用时空切片（Spacetime Patches）将任意分辨率与时长的视频统一表示为序列，以巨型 DiT 实现分钟级高连贯性生成。
-- **HunyuanVideo / Wan (腾讯 / 阿里)**: 开源双流/单流混合 DiT 视频生成架构，具备极强的时间连贯性与精细物理规律还原度。
-- **Kling (快手)**: 在复杂大动作生成与高分辨率长镜头运镜方面表现卓越。
-
-## 9.5 全模态统一系统 (Omni Models)
-
-大模型发展的终极形态是建立能够全双工、低延迟处理任意模态输入与输出的统一智能体（Omni Foundation Models）。
+除了扩散模型，另一条路线是照搬 LLM 的做法，用自回归（Next-Token Prediction）方式生成图像：
 
 ```
-任意输入流 (文字 / 图像视频流 / 麦克风实时音频)
-                    │
-                    ▼
-     统一离散/连续多模态 Token 抽象表示层
-                    │
-                    ▼
-      全模态因果注意力基座 (Omni-Transformer)
-                    │
-                    ▼
- 专用解码头 (文本 Logits / 神经音频解码流 / 视觉生成潜在向量)
-                    │
-                    ▼
-任意输出流 (流式文字 / 实时自然对话语音 / 动态生成图像视频)
+路线一: 离散视觉词表 (VQVAE / VQGAN, 如 Parti, Chameleon, Emu3)
+  把图像通过离散编码器量化成一串整数编号 (如 1024 个码本 token)
+  和文本 token 混在一起，直接用标准自回归 Transformer 逐个预测
+
+路线二: 自回归 + 扩散混合 (Transfusion / MAR / Show-o)
+  同一个 Transformer 里，遇到文本走自回归交叉熵损失，遇到图像走连续 Patch 扩散损失
+  兼顾文本的逻辑推理与图像的连续细节质量
 ```
 
-**核心工程挑战**:
-1. **统一分词与表征鸿沟**: 如何在离散文本符号与高熵连续物理信号之间建立统一且高效的信息瓶颈。
-2. **实时流式全双工交互**: 实现端到端毫秒级中断响应（Voice Interruption），摒弃传统的“ASR → LLM → TTS”级联架构。
-3. **跨模态算力均衡**: 避免高开销视觉与音频数据冲垮轻量化文本推理的低延迟边界。
+## 9.3 音频与语音（Audio & Speech）
+
+### 9.3.1 语音识别（ASR）
+
+OpenAI 的 **[Whisper](https://arxiv.org/abs/2212.04356)** 是目前最通用的语音转文字基座：
+
+```
+原始音频波形 → 转成 80 通道 Log-Mel 频谱图 → 2 层卷积 + Transformer Encoder
+→ Transformer Decoder (通过 Cross-Attention 读取音频特征) → 输出文字与时间戳
+
+训练数据: 68 万小时多语言弱监督音频
+特点: 支持 98 种语言转录与翻译，抗背景噪音能力强
+```
+
+> 开源仓库：[openai/whisper](https://github.com/openai/whisper)（生产部署常用更快的重实现如 `faster-whisper` 或 `whisper.cpp`）。
+
+### 9.3.2 语音合成（TTS）
+
+现代 TTS 普遍引入了神经音频编解码器（Neural Audio Codec，如 EnCodec、SNAC），先把连续声波压成离散的声学 token，再用自回归或流匹配模型生成：
+
+| 模型 | 方法 | 特点 |
+|------|------|------|
+| [**VALL-E**](https://arxiv.org/abs/2301.02111) | 自回归预测 Codec Tokens | 给 3 秒参考音频就能克隆说话人音色 |
+| [**CosyVoice**](https://github.com/FunAudioLLM/CosyVoice) | LLM + Flow Matching | 阿里开源，中文自然度与音色克隆效果好 |
+| [**F5-TTS**](https://arxiv.org/abs/2410.06885) | 非自回归 Flow Matching + DiT | 开源，无需音素对齐，合成速度快 |
+| [**Bark**](https://github.com/suno-ai/bark) | 自回归生成语义与声学 token | 开源，支持生成笑声、叹气等副语言音效 |
+| **GPT-4o Audio** | 端到端原生语音 token | 延迟极低，支持随时打断与情绪控制 |
+
+### 9.3.3 语音理解大模型（Audio-Language Models）
+
+```
+Audio → Audio Encoder (如 Whisper Encoder) → Projector → LLM (与文本一起输入)
+
+用途: 不只是转成文字，还能直接听出说话人的语气情绪、背景环境音和音乐风格
+代表模型: Qwen2-Audio, SALMONN, Gemini 1.5
+```
+
+## 9.4 视频理解与生成
+
+### 9.4.1 视频理解（Video Understanding）
+
+视频可以看作一连串按时间排列的图像帧加音轨。最大的麻烦是 token 数量膨胀太快：每秒抽 2 帧，每帧 256 个 token，一段 10 分钟的视频就有超过 30 万个视觉 token。
+
+```
+做法一: 均匀抽帧 + 空间池化
+  按固定帧率抽帧 → 每帧过 ViT → 用池化或双线性插值把每帧压到 64-144 个 token → 拼起来送入长上下文 LLM
+
+做法二: 3D 时空 Patch 编码 (如 Qwen2-VL)
+  把相邻两帧的同位置像素打包成一个 3D 立方块 (Tubelet)，在编码阶段直接融掉一半时间步
+
+做法三: 原生百万级上下文硬吃 (如 Gemini 1.5 Pro)
+  依靠 Ring Attention 等长序列架构，把整段 1 小时视频的所有帧和音频直接塞进 2M 上下文窗口
+```
+
+### 9.4.2 视频生成（Video Generation）
+
+主流视频生成模型都转向了 **3D 时空 DiT（Spatial-Temporal DiT）** 架构：
+
+```
+文本或首帧图片 → 3D 时空 DiT 在潜在空间去噪 → 3D VAE 解码还原成连续视频帧
+
+核心难点:
+  1. 时间一致性: 镜头移动或人物转身时，背景和长相不能闪烁变形
+  2. 物理规律: 液体流动、碰撞、重力与遮挡关系要符合常识
+  3. 算力消耗: 比单张图片多出一个时间维，3D 注意力的序列长度动辄数万
+```
+
+代表性视频生成模型：
+- **Sora（OpenAI）**：提出 Spacetime Patches，用 3D VAE 把视频在时间和空间上同时压缩，再用大参数 DiT 训练，支持生成长达 1 分钟的多镜头视频。
+- **Veo 2（Google）**：物理运动规律还原度与高分辨率画质表现突出。
+- **HunyuanVideo（腾讯） / Wan 2.1（阿里）**：目前开源界效果最好的两个视频生成底座，支持文生视频与图生视频。
+- **Kling（快手可灵） / Runway Gen-3**：商用视频生成代表，擅长大幅度动作与镜头控制。
+
+## 9.5 全模态模型（Omni Models）
+
+传统的语音对话助手是三个独立模型串起来的流水线：`语音转文字 (ASR) → 文本大模型 (LLM) → 文字转语音 (TTS)`。这种级联做法有两个硬伤：一是延迟叠加动辄两三秒，二是 ASR 转成纯文字时把用户的笑声、停顿、愤怒语气全丢光了。
+
+**Omni（全模态）模型**（如 GPT-4o、Gemini 2.0、Qwen2.5-Omni）的目标是用同一个神经网络直接吃进文本、图像、视频和音频流，并直接吐出文本或语音波形：
+
+```
+任意模态输入 (文本 / 摄像头画面 / 麦克风实时语音)
+                    ↓
+      各模态 Tokenizer 转为统一序列表示
+                    ↓
+         统一自回归 Transformer 基座
+                    ↓
+      文本解码头 / 流式神经语音解码器
+                    ↓
+      实时返回文字 + 自然语音 (支持随时打断)
+```
+
+实现这类端到端模型需要解决三个工程问题：
+1. **跨模态对齐而不伤智商**：早期把语音和图像直接混进 LLM 训练时，经常发现模型的纯文本逻辑推理能力明显退化，需要精细设计多阶段解耦训练或双流架构（如 Qwen2.5-Omni 的 Thinker-Talker 架构，一个大脑负责思考文本，另一个轻量头负责实时合成语音流）。
+2. **流式全双工交互**：模型在说话的同时还要持续监听麦克风输入，一旦用户插话就立刻停下重听。
+3. **帧率控制**：把每秒语音压到 12.5Hz 或 25Hz 的极低帧率离散 token，才能让自回归生成跑赢实时播放速度。
 
 ## 关键论文
 
-- [Radford et al. (2021): Learning Transferable Visual Models From Natural Language Supervision (CLIP)](https://arxiv.org/abs/2103.00020)：对比学习开创图文多模态特征对齐新纪元。
-- [Liu et al. (2023): Visual Instruction Tuning (LLaVA)](https://arxiv.org/abs/2304.08485)：奠定现代开源视觉指令微调的标准两阶段范式。
-- [Peebles & Xie (2023): Scalable Diffusion Models with Transformers (DiT)](https://arxiv.org/abs/2212.09748)：以 Transformer 替代 U-Net，引领现代文生图与文生视频架构变革。
-- [Radford et al. (2022): Robust Speech Recognition via Large-Scale Weak Supervision (Whisper)](https://arxiv.org/abs/2212.04356)：弱监督大规模语音表征与通用识别标杆。
-- [Alayrac et al. (2022): Flamingo: A Visual Language Model for Few-Shot Learning](https://arxiv.org/abs/2204.14198)：基于门控交叉注意力的少样本视觉交互范式。
+- [Radford et al. (2021): CLIP](https://arxiv.org/abs/2103.00020)：用对比学习把图像和文本拉到同一个向量空间，是现代 VLM 和文生图模型的共同地基。
+- [Rombach et al. (2022): Latent Diffusion Models (Stable Diffusion)](https://arxiv.org/abs/2112.10752)：把扩散过程搬到 VAE 潜在空间，大幅降低生图计算开销。
+- [Alayrac et al. (2022): Flamingo](https://arxiv.org/abs/2204.14198)：用 Perceiver Resampler 和门控交叉注意力把视觉特征接进冻结的 LLM。
+- [Radford et al. (2022): Whisper](https://arxiv.org/abs/2212.04356)：基于 68 万小时多语言弱监督数据训练的通用语音识别模型。
+- [Peebles & Xie (2023): DiT (Scalable Diffusion Models with Transformers)](https://arxiv.org/abs/2212.09748)：用 Transformer 替换 U-Net 做扩散模型骨干网。
+- [Liu et al. (2023): LLaVA](https://arxiv.org/abs/2304.08485)：确立“ViT + MLP + LLM”两阶段视觉指令微调的极简开源配方。
 
-## 进阶参考
+## 进一步阅读
 
-- [LLaVA 官方开源项目](https://github.com/haotian-liu/LLaVA)：包含完整的端到端视觉指令微调代码与数据处理管线。
-- [Qwen2-VL 技术报告与源码](https://github.com/QwenLM/Qwen2-VL)：动态分辨率与时空长视频理解的工程参考实现。
-- [Black Forest Labs FLUX.1](https://github.com/black-forest-labs/flux)：现代流匹配 DiT 图像生成的工业级实现。
+- [LLaVA 开源仓库](https://github.com/haotian-liu/LLaVA)：代码简洁，适合入门多模态两阶段训练。
+- [Cambrian-1](https://arxiv.org/abs/2406.16860)：对各种视觉编码器、连接器与训练配方的系统性消融实验报告。
+- [Qwen2-VL 技术报告](https://arxiv.org/abs/2409.12191)：原生动态分辨率与 2D/3D-RoPE 的实现细节。
 
 ## 练习题
 
-1. **VLM 幻觉检测实战**: 使用 Qwen2.5-VL-7B 对一组包含细微文字、反常物理场景与遮挡物体的复杂图像进行描述，设计 Prompt 探测并统计模型的对象幻觉发生率。
-2. **视觉编码器特征对比**: 在同一组图像分类与检索任务上，分别提取 CLIP-ViT-L/14 与 SigLIP-SO400M 的输出向量，计算不同类目在潜在空间中的类内聚类度与类间分离度。
-3. **跨模态以文搜图**: 基于 sentence-transformers 与预训练 CLIP 模型，构建包含 10,000 张图片的本地图文向量索引，实现自然语言语义检索并对比单模态与多模态表征差异。
+1. **VLM 幻觉观察**：找一张包含密集小字或反常识细节的图片喂给开源 VLM（如 Qwen2-VL-7B），故意追问图中不存在的物体（例如“图里左下角那只猫是什么颜色的？”），观察模型是否会顺着提问编造答案。
+2. **视觉编码器对比**：分别加载 `CLIP-ViT-L/14` 和 `SigLIP-SO400M`，抽取同一批含文字图片和自然风景图的特征，对比它们在图文检索上的表现差异。
+3. **以文搜图小系统**：用 CLIP 把本地 1000 张图片编码成向量存入 ChromaDB 或 FAISS，写一个支持用自然语言搜图的命令行小工具。
 
 ---
 

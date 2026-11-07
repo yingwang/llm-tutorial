@@ -4,269 +4,304 @@
 
 ## 3.1 训练目标
 
-### 3.1.1 因果语言建模 (Causal Language Modeling, CLM)
+### 3.1.1 Causal Language Modeling (CLM)
 
-**自回归生成基石**：自回归因果语言建模构成了现代大语言模型预训练的核心优化目标。其数学形式定义为最大化前向序列的联合条件似然概率：
-
-```
-给定离散 Token 序列 x = (x_1, x_2, ..., x_n)
-损失函数 Loss = -Σ_{t=1}^n log P(x_t | x_1, ..., x_{t-1}; θ)
-```
-
-**因果语言建模的核心动力学**：
-- **压缩即表征**：信息论视角下，准确预测下一个 Token 要求模型隐式构建对世界运行规律、句法结构、语义逻辑与多步推理的高维压缩流形；
-- **纯粹的自监督范式**：无需任何人工标注，海量自然语料即天然的监督信号源；
-- **标度律的可预测性**：简单的自回归目标结合模型规模与计算量的持续扩展，能够催生跨领域的通用泛化与少样本学习能力。
-
-### 3.1.2 中间填充 (Fill-in-the-Middle, FIM)
-
-在标准因果自回归基础上赋予模型双向局部补全能力，对代码补全与文档编辑场景至关重要 ([Bavarian et al., 2022](https://arxiv.org/abs/2207.14255))：
+现代生成式大语言模型的核心预训练目标其实只有一件事：根据前文预测下一个 Token（Next-Token Prediction）。
 
 ```
-原始文本序列: A B C D E
-变换为 PSM 模式: <fim_prefix> A B <fim_suffix> D E <fim_middle> C
-
-# 机制：将中间缺失片段搬移至末尾，使因果自回归模型学会在已知前后文的前提下补全空缺
+给定序列 x = (x_1, x_2, ..., x_n)
+Loss = -Σ log P(x_t | x_1, ..., x_{t-1})
 ```
 
-- **工业实践**：GPT-4、[StarCoder](https://arxiv.org/abs/2305.06161) 与 [CodeLlama](https://arxiv.org/abs/2308.12950) 等代码模型普遍在预训练中按 50% 比例混入 FIM 变换数据，其余保留标准 CLM；
-- **推理零开销**：无需更改底层网络架构，仅通过数据表示变换即实现端到端局部插入补全。
+**为什么预测下一个词这么有效**：
+- **压缩即理解**：想要准确猜出下一处该填什么词，模型不能只靠死记硬背，还必须顺带学会语法结构、事实知识、上下文指代甚至逻辑推理；
+- **纯自监督学习**：不需要人工打标签，互联网上的海量文本直接就能拿来当训练样本；
+- **可持续扩展**：这个简单的目标配合更大的模型、更多的数据和算力，能力可以沿着 Scaling Law 持续提升。
 
-### 3.1.3 掩码语言建模 (Masked Language Modeling, MLM)
+### 3.1.2 Fill-in-the-Middle (FIM)
 
-[BERT](https://arxiv.org/abs/1810.04805) 范式：随机对输入序列中 15% 的 Token 进行掩码，依托全连接双向注意力重构被掩盖的真实词：
+标准自回归模型只能从左往右接着写，但在写代码或改文档时，我们经常需要“看着光标前后的内容，补全中间空缺的一段”。Fill-in-the-Middle（[Bavarian et al., 2022](https://arxiv.org/abs/2207.14255)）通过简单改造训练数据的排布顺序，让自回归模型直接具备中间补全能力：
+
+```
+原始: A B C D E
+变换: <fim_prefix> A B <fim_suffix> D E <fim_middle> C
+
+# 模型学会了在知道前后文的情况下填充中间
+# PSM (prefix-suffix-middle) 格式
+```
+
+- GPT-4、[StarCoder](https://arxiv.org/abs/2305.06161)、[CodeLlama](https://arxiv.org/abs/2308.12950)、DeepSeek-Coder 等代码与通用模型都采用了 FIM；
+- 训练时通常只把一部分样本（例如 50%）随机切开做 FIM 变换，其余数据仍按正常从左到右的顺序训练，不会影响常规续写能力。
+
+### 3.1.3 Masked Language Modeling (MLM)
+
+[BERT](https://arxiv.org/abs/1810.04805) 代表的训练方式：随机遮盖（Mask）输入序列里 15% 的 Token，让模型结合前后双向上下文把被遮住的词还原出来：
 ```
 输入: The [MASK] sat on the [MASK]
 目标: cat, mat
 ```
-- **特性**：具备天然的双向上下文感知能力，在判别式理解任务（语义检索、向量表示、命名实体识别）中表现优异；
-- **局限**：缺乏因果自回归生成的自洽性，难以直接扩展至长程开放式生成，现代生成式基座已全面转向 CLM。
+- **优势**：每一层都能同时看到左右两侧的上下文，适合做文本分类、命名实体识别、Embedding 向量提取与检索重排；
+- **劣势**：训练时有 `[MASK]` 标记而推理时没有，且每次只算 15% 位置的损失，不适合直接做长文本生成。如今主要用于训练专门的编码器（Encoder）模型。
 
-## 3.2 数据工程：大模型的知识基座
+## 3.2 数据 (最关键的部分)
 
-预训练数据的质量与多样性直接决定了基座模型的能力上限与安全边界。
+模型架构演进到今天已经高度趋同，决定基座模型能力上限的最关键因素往往是预训练数据的质量、覆盖面与配比。
 
-### 3.2.1 多源语料生态
+### 3.2.1 数据来源
 
-| 语料范畴 | 规模体量 | 质量密度 | 典型代表数据集 |
-|---------|---------|---------|--------------|
-| 网络抓取 (Web Crawl) | PB 级 | 异质低密 | [Common Crawl](https://commoncrawl.org/), [C4](https://huggingface.co/datasets/allenai/c4), FineWeb |
-| 百科与结构化知识 | TB 级 | 高密严谨 | [Wikipedia](https://dumps.wikimedia.org/), Wikidata |
-| 专业书籍 | TB 级 | 连贯深层 | Books3, [Project Gutenberg](https://www.gutenberg.org/) |
-| 开源代码 | TB 级 | 强逻辑性 | GitHub, [The Stack v2](https://huggingface.co/datasets/bigcode/the-stack-v2) |
-| 学术论文与期刊 | TB 级 | 高维严谨 | [arXiv](https://arxiv.org/), [PubMed](https://pubmed.ncbi.nlm.nih.gov/), [S2ORC](https://github.com/allenai/s2orc) |
-| 论坛问答与社群对话 | TB 级 | 多样交互 | Reddit, StackOverflow |
-| 形式化数学与推理 | GB 级 | 极致严密 | [OpenWebMath](https://huggingface.co/datasets/open-web-math/open-web-math), [ProofPile](https://huggingface.co/datasets/EleutherAI/proof-pile-2) |
+| 来源 | 规模 | 质量 | 代表数据集 |
+|------|------|------|-----------|
+| Web crawl | PB级 | 参差不齐 | [Common Crawl](https://commoncrawl.org/), [C4](https://huggingface.co/datasets/allenai/c4), [FineWeb](https://huggingface.co/datasets/HuggingFaceFW/fineweb) |
+| 百科/知识 | TB级 | 高 | [Wikipedia](https://dumps.wikimedia.org/), Wikidata |
+| 书籍 | TB级 | 高 | Books3, [Project Gutenberg](https://www.gutenberg.org/) |
+| 代码 | TB级 | 中高 | GitHub, [The Stack v2](https://huggingface.co/datasets/bigcode/the-stack-v2) |
+| 科学论文 | TB级 | 高 | [arXiv](https://arxiv.org/), [PubMed](https://pubmed.ncbi.nlm.nih.gov/), [S2ORC](https://github.com/allenai/s2orc) |
+| 对话/论坛 | TB级 | 中 | Reddit, StackOverflow |
+| 数学 | GB级 | 高 | [OpenWebMath](https://huggingface.co/datasets/open-web-math/open-web-math), [ProofPile](https://huggingface.co/datasets/EleutherAI/proof-pile-2) |
 
-### 3.2.2 工业级数据清洗流水线
+### 3.2.2 数据处理 Pipeline
+
+从原始网页抓取（Common Crawl）到真正送进 GPU 训练，中间要经过一条严密的清洗流水线，通常会筛掉 80%–90% 的低质与重复内容：
 
 ```
-原始 Web 网页抓取 (Raw Web Crawl)
+Raw Web Crawl
     │
     ▼
-① URL/域名过滤 (屏蔽成人、低质农场、黑产与合规违规站点)
+① URL 过滤 (去掉成人/垃圾/广告/违规网站)
     │
     ▼
-② 语言判别与语系分流 (fastText lid.176.bin)
+② 语言识别 (fastText lid.176.bin)
     │
     ▼
-③ 正文提取与噪声剥离 (Trafilatura, Resiliparse)
-    │  - 剥离 HTML 模板、广告脚本与导航栏冗余
-    │  - 提取主体正文并保留段落层级
+③ 文本提取 (trafilatura, resiliparse)
+    │  - 剥离 HTML 标签、导航栏与页脚模板 (boilerplate)
+    │  - 提取正文并保留基础段落与公式格式
     │
     ▼
-④ 多维度质量过滤 (Quality Filtering)
-    │  - 启发式规则过滤 (剔除异常长度、字符重复率过高、标点异常文本)
-    │  - 困惑度过滤 (KenLM N-gram 语言模型，剔除 Perplexity 异常的乱码)
-    │  - 神经分类器过滤 (训练 fastText / BERT 分类器对齐高质量文本分布)
+④ 质量过滤
+    │  - 长度过滤 (去掉过短或无完整句子的碎片)
+    │  - 困惑度过滤 (用 KenLM 语言模型筛掉 perplexity 异常高的乱码文本)
+    │  - 分类器过滤 (用 fastText 或小模型区分百科/教材级高质文本与垃圾网页)
+    │  - 启发式规则 (去掉重复词比例过高、特殊符号异常堆砌的页面)
     │
     ▼
-⑤ 层次化去重 (Deduplication)
-    │  - 精确去重 (SHA-256 哈希匹配行/段级重复)
-    │  - 模糊去重 (MinHash + LSH，在 Jaccard 相似度阈值 > 0.8 实施聚类剔除)
-    │  - 跨文档全局去重 (后缀数组 Suffix Array 去除长公共子串)
+⑤ 去重 (Deduplication)
+    │  - 精确去重: 基于 SHA-256 哈希去掉完全相同的文档或段落
+    │  - 模糊去重: MinHash + LSH (Jaccard 相似度 > 0.8 即视为重复)
+    │  - 跨文档子串去重: 后缀数组 (Suffix Array) 剔除大段重复模板
     │
     ▼
-⑥ 隐私敏感信息脱敏 (PII Masking)
-    │  - 正则模式识别脱敏邮箱、电话、身份证与 IP 地址
-    │  - NER 实体识别脱敏姓名与敏感地理坐标
+⑥ PII 去除 (隐私脱敏)
+    │  - 正则匹配替换邮箱、电话、身份证号、IP 地址
+    │  - NER 模型识别并隐去敏感个人信息
     │
     ▼
-⑦ Tokenization 编码与二进制固化 (写入 Memory-mapped 文件，如 Arrow / Binary Shards)
+⑦ Tokenize → 打包存为二进制 memory-mapped 文件
 ```
 
-> 工业级核心工具：[HuggingFace datatrove](https://github.com/huggingface/datatrove)（大规模分布式数据清洗框架）与 [dolma](https://github.com/allenai/dolma)（Allen AI 数据工具链）。
+> 常用开源清洗工具：[HuggingFace datatrove](https://github.com/huggingface/datatrove)（大规模分布式数据处理框架） | [dolma](https://github.com/allenai/dolma)（Allen AI 开源的数据处理工具链）
 
-### 3.2.3 数据混合配比 (Data Mixture)
+### 3.2.3 数据配比 (Data Mix)
 
-**全局知识拓扑配比**：针对多源异质数据确定最优采样比例，直接影响模型在不同下游维度的能力平衡。
-
-LLaMA 3 的典型配比结构：
+不同来源的语料按什么比例混合喂给模型，会直接影响模型在各项能力上的长短板。以 LLaMA 3 为例，其预训练语料的大致构成为：
 ```
-英文通用网页语料: ~50%
-多语言网页语料: ~15%
-高质量源代码: ~17%
-形式化数学与科技文献: ~5%
-高质专业书籍: ~5%
-百科与权威知识库: ~5%
-高质量对话交互: ~3%
+Web (英文): ~50%
+Web (多语言): ~15%
+代码: ~17%
+数学/科学: ~5%
+书籍: ~5%
+百科/知识: ~5%
+对话: ~3%
 ```
 
-**配比搜索与优化方法**：
-1. **代理模型消融法**：利用 1B 参数规模的小型代理模型，在不同配比下训练并评测下游基准，以低成本拟合泛化曲面；
-2. **分布稳健优化 (DoReMi)** ([Xie et al., 2023](https://arxiv.org/abs/2305.10429))：利用小模型在各领域的超额损失自适应计算最优重采样权重；
-3. **能力经验规律**：提高代码占比可显著激发因果推理与指令逻辑；提升数学占比强化符号推演；注入适量对话语料改善对话对齐。
+**怎么找最优配比**：
+1. **小模型代理实验**：先在 1B 规模的小模型上跑多组不同配比，看哪组在下游评测集上涨分最快，再把验证过的配比放大到主模型；
+2. **DoReMi**（[Xie et al., 2023](https://arxiv.org/abs/2305.10429)）：利用分布鲁棒优化（DRO），根据小模型在各个数据域上的损失下降难易程度自动调整各域权重；
+3. **常见经验**：适当提高代码占比能显著增强长链条逻辑推理能力，提高数学与论文占比有助符号推导，而书籍数据则对长文本连贯性至关重要。
 
-### 3.2.4 课程学习与退火策略 (Curriculum & Annealing)
+### 3.2.4 Data Curriculum
 
-**动态数据课程调度**：预训练并非静态混合全量语料，而是依据优化动力学实施渐进式阶段调度：
+现代预训练很少从头到尾使用同一套数据分布，而是按训练阶段动态调整数据内容（课程学习）：
 
-1. **基础泛化阶段 (Major Training)**：输入广阔多样的通用网页语料，建立宽广的语言规律与常识底座；
-2. **能力强化阶段 (Mid-to-Late Phase)**：上调高质量代码、数学与学术文献的采样权重，强化逻辑推理深度；
-3. **学习率退火阶段 (Annealing)**：
-   - 在训练末期（最后 2%–5% Token），将高质量合成数据与权威知识库比例大幅提升至 50% 以上；
-   - 学习率配合余弦衰减逼近零，快速将模型参数沉淀收敛于高泛化低熵低谷。
+1. **第一阶段（常规预训练，占绝大部分步数）**：使用覆盖面广、多样性高的通用网页与基础语料，打好语言与世界常识底子；
+2. **第二阶段（中期能力强化）**：逐步调高代码、数学、科学文献与长文本的比例；
+3. **退火阶段（Annealing，最后 1%–5% 的训练步数）**：
+   - 把极高质量的精选数据（百科、教材、精选问答、合成数学与代码）比例大幅拉高到 50% 甚至更高；
+   - 同时把学习率快速衰减到接近 0。LLaMA 3 和 DeepSeek-V3 都在退火阶段通过这种做法获得了明显的评测涨点。
 
-### 3.2.5 合成数据范式 (Synthetic Data)
+### 3.2.5 Synthetic Data
 
-**前沿发展方向**：利用高能力前沿模型（如 GPT-4）作为数据引擎，构建高结构化、高信息密度的合成语料，弥补自然文本中高质量知识与推理步骤的短缺。
+高质量的自然人类文本（尤其是带详细解题步骤的数学、严谨的代码和教材级解释）正在被逐渐耗尽，用强模型生成合成数据（Synthetic Data）已经成为预训练和后训练的重要补充：
 
-| 数据范畴 | 生成与构建方法 | 核心应用阶段 |
-|---------|--------------|------------|
-| 复杂指令与回答 | 强模型生成多轮 QA 与复杂约束提示词 | SFT / RLHF |
-| 算法与可执行代码 | 模型生成候选代码 + 沙盒单元测试执行过滤 | 代码预训练与代码微调 |
-| 形式化数学与思维链 | 模型生成细粒度推导步骤 + Lean/Python 求解器验证 | 数学逻辑与推理强化 |
-| 教科书式优质读物 | ["Textbooks Are All You Need"](https://arxiv.org/abs/2306.11644) (Phi) | 极小参数模型预训练 |
-| 网页文本重写与提炼 | 强模型将口语化/杂乱网页重写为结构化专业论述 | 预训练质量提纯 |
+| 类型 | 方法 | 用途 |
+|------|------|------|
+| Instruction data | 用强模型生成多样化指令与回答对 | SFT 指令微调 |
+| Code data | 模型生成代码与测试用例 + 沙盒运行验证 | 代码预训练与强化 |
+| Math data | 模型生成分步推导过程 + 符号求解器/答案校验 | 数学推理能力 |
+| Textbook-quality | 仿照教材风格生成概念讲解与例题（["Textbooks Are All You Need"](https://arxiv.org/abs/2306.11644)） | 高密度预训练 |
+| Rephrased data | 用模型把行文杂乱的网页改写成条理清晰的知识段落 | 提升网页语料信噪比 |
 
-**[Phi 系列](https://arxiv.org/abs/2404.14219) 启示**：微软 Phi-3 证实，依托极致清洗的高质量合成语料，3.8B 模型能够在常识与推理评测上比肩传统海量自然语料训练的 8B 基座。
+**[Phi 系列](https://arxiv.org/abs/2404.14219)（Microsoft）**展示了一个典型案例：只要把合成的“教科书级”高密度语料做精，3.8B 参数的 Phi-3 在推理和代码基准上就能追平甚至超过许多用普通网页语料训出来的 7B–8B 模型。
 
-## 3.3 训练过程与优化动力学
+## 3.3 训练过程
 
-### 3.3.1 优化器选型与状态显存分析
+### 3.3.1 优化器
 
-**AdamW** ([Loshchilov & Hutter, 2019](https://arxiv.org/abs/1711.05101)) 构成了现代大模型预训练的通用基准：
+**AdamW**（[Loshchilov & Hutter, 2019](https://arxiv.org/abs/1711.05101)）目前仍是几乎所有大模型预训练的默认选择：
 ```
-m_t = β_1 * m_{t-1} + (1 - β_1) * g_t          # 一阶动量 (Momentum)
-v_t = β_2 * v_{t-1} + (1 - β_2) * g_t²         # 二阶矩 (自适应方差估计)
-m̂_t = m_t / (1 - β_1^t)                         # 偏差修正
+m_t = β_1 * m_{t-1} + (1 - β_1) * g_t          # 一阶矩 (momentum)
+v_t = β_2 * v_{t-1} + (1 - β_2) * g_t²         # 二阶矩 (adaptive LR)
+m̂_t = m_t / (1 - β_1^t)                         # bias correction
 v̂_t = v_t / (1 - β_2^t)
-θ_t = θ_{t-1} - lr * (m̂_t / (√v̂_t + ε) + wd * θ_{t-1})  # 显式权重衰减解耦
+θ_t = θ_{t-1} - lr * (m̂_t / (√v̂_t + ε) + wd * θ_{t-1})  # 解耦权重衰减
 ```
 
-**典型超参数配置**：
-- $\beta_1 = 0.9, \beta_2 = 0.95$（LLaMA/DeepSeek 配置，较标准 0.999 具备更强抗噪性）；
-- $\epsilon = 1\times 10^{-8}$，$\text{weight\_decay} = 0.1$；
-- 峰值学习率：$3\times 10^{-4}$（1B–7B 规模）至 $1.5\times 10^{-4}$（70B+ 规模）。
+**典型超参设置**：
+- $\beta_1 = 0.9, \beta_2 = 0.95$（LLaMA、DeepSeek 常用 0.95，比默认的 0.999 对梯度突变反应更快，能减少 Loss Spike）；
+- $\epsilon = 1\times 10^{-8}$，`weight_decay = 0.1`；
+- 峰值学习率：小模型常用 `3e-4` 到 `6e-4`，百亿到千亿大模型通常降到 `1e-4`–`1.5e-4`。
 
-**优化器显存占用分析**：每个模型参数在 FP32 Master Weight、FP32 一阶动量 $m$ 与 FP32 二阶矩 $v$ 下共需消耗 12 字节显存。对于 70B 模型，仅优化器状态即需占用约 840 GB 显存。
+**AdamW 的显存开销**：为了保证数值精度，混合精度训练时每个参数除了存 BF16 权重（2 字节）和 BF16 梯度（2 字节），优化器里还得存一份 FP32 主权重（4 字节）、FP32 一阶矩 $m$（4 字节）和 FP32 二阶矩 $v$（4 字节），加起来优化器状态就要占 12 字节/参数。对于一个 70B 模型，仅优化器状态就要占约 840 GB 显存。
 
-**前沿替代优化器探索**：
-- **[Adafactor](https://arxiv.org/abs/1804.04235)**：通过行/列低秩矩阵分解近似二阶矩，优化器显存消耗减半，曾应用于 T5；
-- **[LION](https://arxiv.org/abs/2302.06675)**：利用符号函数 $\text{sign}(\text{momentum})$ 指导更新，仅需维护一阶动量，显存更省；
-- **[Sophia](https://arxiv.org/abs/2305.14342)**：引入对角 Hessian 矩阵估计曲率，具备更敏捷的逃离鞍点能力；
-- **[MUON](https://arxiv.org/abs/2502.16982)**：在矩阵参数空间利用动量的极分解（Polar Decomposition）生成正交更新方向，显著提升超大矩阵运算的收敛效率。
+**其他替代优化器**：
+- **[Adafactor](https://arxiv.org/abs/1804.04235)**：用行列向量的外积低秩近似二阶矩 $v$，省下一半优化器显存，T5 曾使用；
+- **[LION](https://arxiv.org/abs/2302.06675)**：只追踪一阶动量并用符号函数 $\text{sign}()$ 更新，显存开销更小，但对学习率和权重衰减超参更敏感；
+- **[Sophia](https://arxiv.org/abs/2305.14342)**：引入轻量的对角海森矩阵（Hessian diagonal）近似二阶曲率，自适应调整各维度步长；
+- **[MUON](https://arxiv.org/abs/2502.16982)**：对矩阵参数的动量做 Newton-Schulz 正交化更新，在不少中大规模预训练实验里展现出比 AdamW 更快的收敛速度。
 
-### 3.3.2 学习率调度策略
+### 3.3.2 学习率调度
 
-**标准余弦衰减 (Linear Warmup + Cosine Decay)**：
-```
-# 预热阶段: 前 2000 步线性爬升至峰值
+**经典方案**：Linear Warmup + Cosine Decay（线性预热 + 余弦衰减）
+
+```python
+# Warmup: 前 2000 步从 0 线性升到峰值学习率
 if step < warmup_steps:
     lr = peak_lr * step / warmup_steps
 
-# 余弦衰减阶段: 平滑下行至终点最小值 (通常为峰值的 10%)
+# Cosine decay: 按余弦曲线平滑降到最小值 (通常是峰值的 10%)
 else:
     progress = (step - warmup_steps) / (total_steps - warmup_steps)
     lr = min_lr + 0.5 * (peak_lr - min_lr) * (1 + cos(π * progress))
 ```
 
-**WSD 调度策略 (Warmup-Stable-Decay)** ([MiniCPM](https://arxiv.org/abs/2404.06395))：
+**WSD (Warmup-Stable-Decay)**（[MiniCPM](https://arxiv.org/abs/2404.06395)）：
 ```
-Warmup (预热) → Stable (长周期恒定学习率) → Decay (急剧退火)
+Warmup (预热) → 保持恒定学习率（占主体训练时间）→ 最后阶段快速 Decay 退火
 ```
-- **核心优势**：在 Stable 阶段任意时刻均可低成本派生（Branch out）退火分支，评估当前状态能力；
-- **工程价值**：大幅简化持续预训练（Continual Pretraining）与领域扩展的流程。
+- **优势**：余弦调度必须事先定死总训练步数 `total_steps`，中途想加数据很不方便；而 WSD 在恒定学习率阶段可以一直训下去，随时可以从任意 Checkpoint 拉出一条分支做快速退火拿到可用模型；
+- MiniCPM、DeepSeek-V3 等模型都采用了这种或类似的调度策略。
 
-### 3.3.3 训练稳定性与异常处理
+### 3.3.3 训练稳定性
 
-**Loss 突刺 (Loss Spike)**：预训练过程中损失值突然异常飙升，为千卡集群训练中最常见的风险。
+大规模预训练动辄跑几周甚至几个月，途中经常会遇到 Loss 突然暴涨（Loss Spike）甚至变成 `NaN` 的情况。
 
-**常见成因与防御方案**：
-| 异常诱因 | 典型表征 | 工程防御对策 |
-|---------|---------|------------|
-| 梯度爆炸 | 梯度范数突增，损失变为 NaN/Inf | 梯度全局截断（Gradient Clipping，阈值设为 1.0） |
-| 低质恶性数据 | 单个 Batch 后损失骤增但可缓慢恢复 | 动态跳过损失超过阈值的异常异常 Batch |
-| 学习率超标 | 损失呈现周期性高频振荡 | 调低峰值学习率或延长 Warmup 周期 |
-| 注意力数值发散 | QK 点积极大导致 Softmax 溢出 | 引入 QK-Norm 或 Logit 软截断机制 |
-| BF16 精度下溢/溢出 | Embedding 层或顶层 Head 梯度数值越界 | 将 Embedding 与 Logits 计算提升至 FP32 精度 |
-| 偏置漂移 | 预测 Logits 绝对值整体失控飘高 | 引入 z-loss 辅助正则：$\mathcal{L}_z = \alpha \log^2(\sum \exp(\text{logits}))$ |
+**常见原因与应对手段**：
 
-### 3.3.4 批次规模与临界批次策略
+| 问题 | 症状 | 解决方案 |
+|------|------|---------|
+| 梯度爆炸 | 梯度范数暴涨，Loss 突然变 NaN/Inf | 开启梯度裁剪 `gradient clipping (max_norm=1.0)` |
+| 脏数据批次 | 遇到某个 Batch 后 Loss 飙升，随后慢慢恢复 | 检测并自动跳过异常 Batch，排查对应数据分片 |
+| 学习率偏高 | Loss 频繁出现尖峰震荡 | 调低峰值学习率，或把 AdamW 的 $\beta_2$ 从 0.999 降到 0.95 |
+| 注意力数值发散 | 深层 QK 点积过大导致 Softmax 饱和 | 给 Q 和 K 加 RMSNorm（QK-Norm），或做 Logit Soft-Capping |
+| 低精度溢出 | Embedding 层或输出层数值越界 | 保持 Embedding 与 LM Head 的计算在 FP32 下进行 |
+| Logits 整体漂移 | 输出层 Logits 绝对值越训越大 | 加入 z-loss 正则项：$\alpha \cdot \log^2(\sum \exp(\text{logits}))$ |
+
+**工程经验**：Google 在训练 [PaLM 540B](https://arxiv.org/abs/2204.02311) 时遇到了大约 20 次明显的 Loss Spike。最直接管用的工程恢复办法就是：从尖峰出现前约 100 步的 Checkpoint 重新拉起训练，并跳过触发尖峰的那几批数据。
+
+### 3.3.4 Batch Size 策略
+
+分布式训练中的全局有效批次大小（Global Batch Size，常按总 Token 数计量）由三项相乘决定：
+```
+有效 batch size = micro_batch_size × gradient_accumulation × dp_world_size
+
+典型值:
+- LLaMA 2: 4M tokens per batch
+- LLaMA 3 405B / DeepSeek-V3: 16M ~ 60M tokens per batch
+```
+
+**Batch Size Warmup**：训练刚起步时梯度方向变化快，先用较小的全局 Batch Size（如 4M Tokens）跑完早期阶段，中后期再逐步放大到 16M–60M Tokens，兼顾早期收敛速度与后期的多卡并行吞吐。
+
+**临界批次大小（Critical Batch Size）**（[McCandlish et al., 2018](https://arxiv.org/abs/1812.06162)）：当 Batch Size 小于临界值时，加倍 Batch Size 差不多能把训练步数减半（近乎线性加速）；一旦超过临界值，继续靠堆卡增大 Batch Size 只会带来梯度信息冗余，算力利用率显著下降：
+```
+B_crit ≈ B_noise / L   # B_noise 是梯度噪声规模，L 是当前 loss
+```
+随着训练推进、Loss $L$ 不断下降，临界批次大小 $B_{\text{crit}}$ 会自然变大，这也解释了为什么训练中后期可以把 Batch Size 调得更大。
+
+### 3.3.5 数值精度
+
+| 精度 | 位宽 | 动态范围 | 典型用途 |
+|------|------|---------|---------|
+| FP32 | 32位 (1+8+23) | $\pm 3.4\times 10^{38}$ | 优化器状态、Master Weights、归一化累加 |
+| TF32 | 19位 (1+8+10) | 同 FP32 | NVIDIA Ampere+ 架构默认矩阵乘内部格式 |
+| BF16 | 16位 (1+8+7) | 同 FP32 | **主流训练默认精度**（指数位同 FP32，不易溢出） |
+| FP16 | 16位 (1+5+10) | $\pm 65504$ | 早期半精度训练（动态范围窄，必须配 Loss Scaling） |
+| FP8 | 8位 | E4M3 / E5M2 | H100 / B200 等新架构上的高吞吐训练 |
+
+**混合精度训练（Mixed Precision Training）**（[Micikevicius et al., 2018](https://arxiv.org/abs/1710.03740)）：
+```python
+# PyTorch AMP 示例
+with torch.autocast(device_type='cuda', dtype=torch.bfloat16):
+    output = model(input)
+    loss = criterion(output, target)
+
+# 前向与反向用 BF16 加速，优化器用 FP32 主权重更新
+scaler.scale(loss).backward()
+scaler.step(optimizer)
+scaler.update()
+```
+
+**FP8 训练**（H100 / B200）：
+- 前向传播对精度更敏感，使用尾数多一位的 **E4M3**（4 位指数、3 位尾数）；
+- 反向传播梯度变化范围大，使用指数多一位的 **E5M2**（5 位指数、2 位尾数）；
+- 配合细粒度的按块缩放（Tile/Block-wise Scaling）防止数值下溢；
+- DeepSeek-V3 在 671B MoE 模型上跑通了全流程 FP8 预训练，在几乎不损精度的前提下大幅提升了计算吞吐。
+
+## 3.4 上下文长度训练
+
+### 3.4.1 短→长两阶段训练策略
+
+几乎没有模型会从第 1 个 Token 起就直接用 128K 的序列长度做预训练，标准做法都是“先短后长”：
+
+1. **第一阶段（常规短序列预训练）**：在 4K 或 8K 上下文窗口下完成 90%–95% 以上的训练量；
+2. **第二阶段（长上下文持续训练）**：调大 RoPE 的基频（如从 10,000 调到 500,000 或更高），换用包含长文档的语料，在 32K–128K 长度上继续训练 1%–5% 的 Token。
+
+**为什么不从一开始就用长序列**：
+- 自注意力的计算量随序列长度呈 $\mathcal{O}(n^2)$ 增长，直接训 128K 序列的单步算力开销是 4K 的上千倍；
+- 互联网上真正具备长程依赖的高质量长文档（长篇书籍、完整代码库）占比并不高；
+- 模型先在短窗口里把词法、句法和基础推理学扎实，后期只需要少量长文本就能快速学会跨长距离检索信息。
+
+### 3.4.2 Ring Attention / Context Parallelism
+
+（[Liu et al., 2023](https://arxiv.org/abs/2310.01889)）当序列长度扩到 128K 甚至 1M 时，单条样本的中间激活值和 KV 张量在一张 GPU 上根本装不下。这时需要把同一条长序列按位置切成多段，分给多张 GPU 协同计算（即上下文并行 Context Parallelism）：
 
 ```
-全局有效 Batch Size = 微批次 (micro_batch_size) × 梯度累积步数 (grad_accum) × 数据并行规模 (DP_size)
+GPU 0: tokens 0-32K      → 计算本段 attention
+GPU 1: tokens 32K-64K    → 计算本段 attention
+GPU 2: tokens 64K-96K    → 计算本段 attention
+GPU 3: tokens 96K-128K   → 计算本段 attention
+           ↻ KV blocks 在 GPU 之间排成环状边传边算
 ```
-
-**典型工业配置**：
-- LLaMA 2: ~4M Tokens/Batch
-- LLaMA 3 405B: ~16M Tokens/Batch
-
-**临界批次规模 (Critical Batch Size)** ([McCandlish et al., 2018](https://arxiv.org/abs/1812.06162))：在临界批次以下，增大 Batch Size 能带来几乎线性的硬件吞吐加速；一旦超越临界批次，样本信息冗余导致优化效率边际收益递减。
-
-### 3.3.5 混合精度计算体系
-
-| 精度格式 | 位宽构成 | 动态范围 | 工业典型用途 |
-|---------|---------|---------|-------------|
-| FP32 | 1 位符号 + 8 位指数 + 23 位尾数 | $\pm 3.4\times 10^{38}$ | 优化器状态主权重更新、损失缩放 |
-| TF32 | 1 位符号 + 8 位指数 + 10 位尾数 | $\pm 3.4\times 10^{38}$ | NVIDIA Ampere 架构默认 GEMM 运算 |
-| BF16 | 1 位符号 + 8 位指数 + 7 位尾数 | $\pm 3.4\times 10^{38}$ | **主流基座预训练默认精度**（防溢出能力同 FP32） |
-| FP16 | 1 位符号 + 5 位指数 + 10 位尾数 | $\pm 65504$ | 早期训练格式（依赖复杂的 Loss Scaling 防止下溢） |
-| FP8 | E4M3 (4指数3尾数) / E5M2 (5指数2尾数) | 视格式而定 | Hopper/Blackwell 架构高吞吐矩阵乘法 |
-
-**FP8 混合精度训练前沿**（DeepSeek-V3 实践）：
-- 前向计算采用 E4M3 保证尾数精度；
-- 反向传播采用 E5M2 保证梯度动态范围；
-- 引入细粒度逐张量/分块缩放因子（Per-tensor / Block Scaling），成功完成 671B 规模 MoE 预训练。
-
-## 3.4 长序列训练演进
-
-### 3.4.1 两阶段短到长训练范式
-
-1. **第一阶段 (标准预训练)**：在 4K/8K 窗口下吞吐 90% 以上的数据，低成本夯实通用语法与知识表征；
-2. **第二阶段 (长上下文持续训练)**：通过 RoPE 基频调优将窗口扩展至 32K–128K，仅需消耗约 1%–5% 的总 Token 预算即可完成长距离注意力对齐。
-
-### 3.4.2 序列并行与环形注意力 (Ring Attention)
-
-([Liu et al., 2023](https://arxiv.org/abs/2310.01889)) 当单序列超长超出单卡显存承载时，将序列切分至多张 GPU，通过环形拓扑流动传递 KV 分块：
-
-```
-GPU 0: 持有序列分块 0–32K   → 局部 Attention 计算
-GPU 1: 持有序列分块 32K–64K → 局部 Attention 计算
-GPU 2: 持有序列分块 64K–96K → 局部 Attention 计算
-GPU 3: 持有序列分块 96K–128K→ 局部 Attention 计算
-       ↻ KV Blocks 沿设备环异步重叠传输与计算
-```
+每张卡拿着自己那一段的 Query 不动，一边计算当前手头 KV 块的注意力，一边通过环形网络把 KV 块传给下一张卡，让通信时间完美隐藏在矩阵计算背后。
 
 ## 关键论文
 
-- [Brown et al. (2020) — GPT-3](https://arxiv.org/abs/2005.14165): Few-Shot 上下文学习奠基之作
-- [Hoffmann et al. (2022) — Chinchilla](https://arxiv.org/abs/2203.15556): 计算最优标度律
-- [Touvron et al. (2023) — LLaMA 2](https://arxiv.org/abs/2307.09288): 开源大模型工程实现细节
-- [DeepSeek-AI (2024) — DeepSeek-V3 Technical Report](https://arxiv.org/abs/2412.19437): MoE 细粒度路由与全流程 FP8 训练
-- [Liu et al. (2023) — Ring Attention](https://arxiv.org/abs/2310.01889): 跨节点超长序列分布式注意力
+- [Brown et al. (2020): GPT-3 (Language Models are Few-Shot Learners)](https://arxiv.org/abs/2005.14165)：展示大规模预训练带来的上下文少样本学习能力
+- [Hoffmann et al. (2022): Training Compute-Optimal Large Language Models (Chinchilla)](https://arxiv.org/abs/2203.15556)：明确模型参数量与训练 Token 数的算力最优配比
+- [Touvron et al. (2023): LLaMA 2](https://arxiv.org/abs/2307.09288)：详尽公开预训练与后训练流程的开源基座报告
+- [DeepSeek-AI (2024): DeepSeek-V3 Technical Report](https://arxiv.org/abs/2412.19437)：涵盖细粒度 MoE、FP8 混合精度训练与多 Token 预测的工程实践
+- [Liu et al. (2023): Ring Attention with Blockwise Transformers](https://arxiv.org/abs/2310.01889)：突破单卡显存限制的超长序列并行训练方案
 
-## 进阶参考
+## 进一步阅读
 
-- Karpathy: [Let's reproduce GPT-2 (124M)](https://www.youtube.com/watch?v=l8pRSuU81PU)（4 小时手写从零训练 GPT-2 完整实战）
-- [LLaMA 3 技术报告](https://arxiv.org/abs/2407.21783)（405B 万卡规模预训练全景拆解）
-- EleutherAI: [The Pile 论文](https://arxiv.org/abs/2101.00027)（大规模多源预训练语料构建典范）
+- [Karpathy: Let's reproduce GPT-2 (124M)](https://www.youtube.com/watch?v=l8pRSuU81PU)：4 小时手把手从零写出并训练 GPT-2
+- [LLaMA 3 Herd of Models 技术报告](https://arxiv.org/abs/2407.21783)：详解 15T 语料清洗、退火策略与 405B 分布式训练细节
+- [Penedo et al. (2024): The FineWeb Datasets](https://arxiv.org/abs/2406.17557)：HuggingFace 开源的 15T 高质量网页清洗流程与消融实验
 
-## 实践训练
+## 练习题
 
-1. **算力与标度律估算**：给定 8 卡 H100 训练 2 周的算力预算，依据 Chinchilla 计算最优法则推导最优参数量与训练 Token 规划。
-2. **微型 GPT 训练与 Loss 分析**：基于精简语料训练 124M 模型，绘制完整 Loss 曲线与 Perplexity 走势，观察余弦退火阶段的学习动态。
-3. **领域数据消融评测**：在预训练混合语料中将 5% 通用语料替换为高质量形式化数学语料，对比验证基座在下游 GSM8K 上的少样本推演收益。
+1. **Chinchilla 算力推算**：假设手头有 8 张 H100（按 45% MFU 估算有效算力），计划连续训练 2 周，请按 Chinchilla 最优比例算出大概适合训练多大参数的模型、需要准备多少亿 Token 的数据。
+2. **动手复现 GPT-2**：使用 nanoGPT 在 OpenWebText 子集上训练一个 124M 模型，记录训练 Loss 曲线与验证集 Perplexity，并对比开启与关闭学习率 Warmup 的差异。
+3. **数据配比消融**：在一个小型语言模型训练中，把 5% 的普通网页语料替换成高质量代码（如 StarCoder 数据）或数学推导语料（如 OpenWebMath），观察模型在 GSM8K 或代码补全上的变化。
 
 ---
 

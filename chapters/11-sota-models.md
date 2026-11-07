@@ -1,165 +1,179 @@
 [← 上一章](10-safety-alignment.md) | [目录](../README.md) | [下一章 →](12-distillation-merging.md)
 
----
+# 第十一章：主流模型技术解析
 
-# 第十一章：前沿 SOTA 模型深度解析
+前面十章拆解了模型架构、训练工程与后训练方法，本章把这些零件装回真实模型里，看看当前几家主流开源与闭源模型（LLaMA 3、DeepSeek-V3/R1、Claude、Gemini、GPT-4/o1/o3、Qwen 2.5、Mistral 以及端侧小模型）各自是怎么做架构取舍和训练配方的。
 
-大语言模型的演进史是一部算法拓扑、数据课程与系统工程深度协同的交响曲。从开源基准 LLaMA 系列的工业级标杆，到 DeepSeek 细粒度 MoE 与低秩潜变量注意力的极致效率突破，再到 OpenAI o 系列与 Claude 4 在深度推理与智能体维度的开疆拓土，各前沿架构在标度律探索中展现出各具特色的技术哲学。本章对当代代表性 SOTA 模型进行全景技术拆解。
+## 11.1 LLaMA 3 / 3.1 / 3.3（Meta）
 
-## 11.1 LLaMA 3 / 3.1 / 3.3 (Meta)
+> 论文：[The Llama 3 Herd of Models](https://arxiv.org/abs/2407.21783) | 权重：[meta-llama](https://huggingface.co/meta-llama)
 
-> 核心论文：[LLaMA 3 技术报告](https://arxiv.org/abs/2407.21783) | 开源权重：[meta-llama](https://huggingface.co/meta-llama)
-
-```
-参数规模: 8B, 70B, 405B
-基础骨干: 经典稠密 Transformer, GQA (8 KV 头), RoPE (基频 500,000), SwiGLU, RMSNorm
-词表规模: 128K (采用基于 tiktoken 改进的字节级 BPE)
-原生上下文: 128K (采用 YaRN 变体进行波段分治扩展)
-预训练语料: 15T+ Tokens
-万卡硬件基础设施: 16,384 块 NVIDIA H100 GPU 集群
-405B 训练周期: ~54 天稳定吞吐 (MFU 达 38%–43%)
-
-核心技术亮点:
-- 128K 超大词表显著提升多语言压缩率与代码建模密度；
-- 坚定践行推理经济学驱动的超额训练 (Over-training)：8B 模型吞吐 15T Tokens，远超 Chinchilla 计算最优阈值；
-- 严密的后训练流水线：SFT → 多轮拒绝采样 (Rejection Sampling) → 迭代式 DPO；
-- 代码沙盒执行闭环：以代码编译与单元测试通过率构建客观确定性奖励信号。
-```
-
-## 11.2 DeepSeek-V3 / R1 (DeepSeek)
-
-> 核心论文：[DeepSeek-V3](https://arxiv.org/abs/2412.19437) | [DeepSeek-R1](https://arxiv.org/abs/2501.12948) | 开源权重：[deepseek-ai](https://huggingface.co/deepseek-ai)
+LLaMA 3 选择了最稳妥的工程路线：不在模型结构上搞激进改动（连 MoE 都没上），而是靠扎实的稠密（Dense）Transformer 结构、15T 高质量 token 和 1.6 万张 H100 的工程稳定性把效果推到上限。
 
 ```
-DeepSeek-V3 架构特征:
-  总参数量: 671B (稀疏 MoE 架构，单 Token 激活 37B)
-  核心拓扑: 多头潜变量注意力 (MLA) + 细粒度专家路由 DeepSeekMoE (256 专用专家 + 1 共享专家，激活 Top-8)
-  预训练规模: 14.8T Tokens，依托 2048 块 H800 GPU 集群训练
-  训练总成本: 约 550 万美元 (在同级别模型中展现出极致的显存与计算效率)
-  
-  关键架构突破:
-  - MLA 机制：通过低秩潜变量投影使自回归解码 KV Cache 显存占用缩减逾 90%；
-  - 工业级全流程 FP8 混合精度训练：利用细粒度 Tile 缩放与指数范围适配彻底稳定低比特训练；
-  - 无辅助损失负载均衡：通过动态门控偏置项消除辅助损失对语言建模主目标的干扰；
-  - 多词元预测 (Multi-Token Prediction, MTP)：在主干后并行构建多预测头，提升表征鲁棒性并加速投机推演。
+参数规模: 8B, 70B, 405B (后续推出蒸馏优化版 3.3-70B 与端侧版 3.2-1B/3B)
+模型结构: 标准 Dense Transformer, GQA (8 个 KV 头), RoPE (基频调至 500,000), SwiGLU, RMSNorm
+词表大小: 128K (基于 tiktoken 的 BPE，相比 LLaMA 2 的 32K 大幅提升了代码与多语言压缩率)
+上下文长度: 128K (在预训练最后阶段分 6 步从 8K 逐步扩到 128K)
+预训练数据: 15.6T tokens (清洗并调高了代码与数学比例)
+训练硬件: 16,384 张 H100 80GB (405B 模型训练耗时约 54 天，MFU 达到 38%-43%)
 
-DeepSeek-R1 推理突破:
-  基于 V3 基座构建深度逻辑推理与反思模型
-  
-  关键范式革新:
-  - DeepSeek-R1-Zero：完全摒弃 SFT，纯粹依托可验证奖励 (RLVR) 与 GRPO 算法自发涌现反思与长链推演；
-  - DeepSeek-R1 完整流水线：小规模高质量长思维链冷启动 SFT → 强化学习探索 → 拒绝采样再微调 → 次轮偏好对齐；
-  - 推理性能在 AIME 2024 与 MATH-500 上比肩闭源旗舰 OpenAI o1。
+核心做法:
+- 远超 Chinchilla 比例的过训练 (Over-training): 8B 小模型也喂满 15T tokens，牺牲一点一次性训练算力，换取极低的线上推理成本
+- 后训练不靠复杂强化学习: 采用“SFT → 拒绝采样 (Rejection Sampling) → DPO”多轮迭代，每轮用最新模型生成数据再筛优训练
+- 代码执行反馈: 训代码能力时直接把生成的代码丢进沙盒运行，拿编译和单元测试结果做过滤信号
 ```
 
-## 11.3 Claude 3 / 3.5 / 4 (Anthropic)
+## 11.2 DeepSeek-V3 / R1（DeepSeek）
 
-> 官方文档：[anthropic.com/claude](https://www.anthropic.com/claude)
+> 论文：[DeepSeek-V3](https://arxiv.org/abs/2412.19437) | [DeepSeek-R1](https://arxiv.org/abs/2501.12948) | 权重：[deepseek-ai](https://huggingface.co/deepseek-ai)
 
-```
-架构机制: 专有密集 Transformer / 混合注意力多模态架构
-全谱系定位: Haiku (极速端侧/小任务) → Sonnet (企业主力与复杂编程) → Opus (极限推理与复杂学术综合)
-
-核心特质与竞争优势:
-- 宪法人工智能 (Constitutional AI)：基于显式伦理与客观中立准则实施无监督机器自我对齐；
-- 200K 原生超长上下文，在复杂长文档多跳检索与上下文忠实度上表现卓越；
-- 业界顶尖的代码架构解析、界面还原与 Agentic 自主工具调用能力；
-- 极高的安全对齐水准与完善的红队防御体系。
-```
-
-## 11.4 Gemini 1.5 / 2 (Google)
-
-> 核心论文：[Gemini 1.0](https://arxiv.org/abs/2312.11805) | [Gemini 1.5](https://arxiv.org/abs/2403.05530)
+DeepSeek-V3 和 R1 代表了另一种思路：在算力受限的条件下，靠架构创新（MLA + 细粒度 MoE）、底层系统通信优化（DualPipe + PTX 调优）与强化学习后训练把单卡效率榨干。
 
 ```
-架构机制: 原生多模态统一 Transformer (稀疏 MoE 拓扑)
-算力底座: Google 自研 TPU v5p / v6e 超大集群
+DeepSeek-V3:
+  参数规模: 总参数 671B，单 token 激活 37B
+  核心结构: MLA (多头潜在注意力) + DeepSeekMoE (每层 1 个共享专家 + 256 个路由专家，每次激活 Top-8)
+  训练规模: 14.8T tokens，使用 2048 张 H800 GPU 训练
+  算力账单: 约 278.8 万 H800 卡时 (折合租价约 550 万美元)
 
-核心特质与竞争优势:
-- 原生全模态融合：从预训练初始阶段将文本、高清图像、音频频谱与连续视频帧统一建模；
-- 极具突破性的 1M 至 2M+ 超长上下文窗口，大海捞针评测达成近乎 100% 召回；
-- Project Astra 全双工低延迟流式音视频实时交互；
-- Gemini Flash 体系在维持高泛化能力的同时将推理延迟与成本压缩至极致。
+  关键技术:
+  - MLA 压缩: 把 KV 压成低维潜向量缓存，推理时 KV Cache 占用减少约 93%
+  - 原生 FP8 混合精度训练: 首次在超大规模 MoE 上跑通细粒度分块 (Tile/Block-wise) FP8 前反向矩阵乘
+  - 无辅助损失负载均衡 (Auxiliary-Loss-Free): 用动态调整的路由偏置项替代传统辅助 Loss，既防止专家坍缩又不伤害主任务精度
+  - 多词元预测 (Multi-Token Prediction, MTP): 每个位置额外顺带预测下一个词，既加厚训练信号，又能在推理时直接拿来做投机采样加速
+
+DeepSeek-R1:
+  基于 V3 基座训练的深度推理模型
+
+  关键发现:
+  - DeepSeek-R1-Zero: 完全跳过 SFT，直接拿 V3 Base 跑纯强化学习 (GRPO 算法 + 数学/代码规则判分奖励)，模型自发学会了拉长思维链、自我验算和回溯反思
+  - DeepSeek-R1 完整四阶段流程:
+    1. 几千条长思维链冷启动 SFT (解决纯 RL 输出可读性差、中英混杂的问题)
+    2. 面向推理任务的二阶段大规模 GRPO 强化学习
+    3. 拒绝采样收集推理与通用数据，混入 V3 通用数据重新做一轮全量 SFT
+    4. 全场景强化学习对齐 (兼顾推理准确性与安全有用性)
+  - 数学与代码推理表现对齐 OpenAI o1，且完整开放权重与技术报告
 ```
 
-## 11.5 GPT-4 / o1 / o3 (OpenAI)
+## 11.3 Claude 3 / 3.5 / 4（Anthropic）
 
-> 官方文档：[platform.openai.com](https://platform.openai.com/docs)
+> 文档：[anthropic.com/claude](https://www.anthropic.com/claude)
 
-```
-GPT-4 密集/稀疏基座:
-  推测架构: ~1.8T 总参数规模稀疏 MoE (16 专家路由，激活 Top-2)
-  训练底座: 依托约 25,000 块 A100 GPU 吞吐 13T+ Tokens
-
-o1 / o3 深度推理体系:
-  范式跃迁: 从单纯追求更大参数量转向“测试期算力标度律 (Test-Time Compute Scaling)”；
-  关键技术机制:
-  - 依托大规模可验证强化学习训练隐式思维链 (Hidden Chain-of-Thought)；
-  - 引入过程奖励模型 (PRM) 与树状搜索剪枝，赋予模型多角度自检、回溯与策略重构能力；
-  - OpenAI o3 在 ARC-AGI 等极高难通用抽象推理测试中达成突破性表现。
-```
-
-## 11.6 通义千问 Qwen 2.5 / QwQ (Alibaba)
-
-> 核心论文：[Qwen2 技术报告](https://arxiv.org/abs/2407.10671) | [Qwen2.5 技术报告](https://arxiv.org/abs/2412.15115) | 开源权重：[Qwen](https://huggingface.co/Qwen)
+Anthropic 不公开具体参数量与底层架构，但 Claude 3.5 Sonnet 与 Claude 4 系列在日常写代码、读长文档和跑 Agent 工作流上积累了极高口碑。
 
 ```
-参数谱系: 0.5B, 1.5B, 3B, 7B, 14B, 32B, 72B 密集模型 + 多规格 MoE 拓扑
-核心配置: GQA, RoPE, SwiGLU, 152K 超大词表
-预训练规模: 18T Tokens 海量中英双语与多语言语料
+型号档位: Haiku (轻量快速) → Sonnet (主力均衡，编码与 Agent 首选) → Opus (大尺寸深度推理)
+上下文窗口: 200K tokens (大海捞针与长文档跨段落细节召回扎实)
 
-核心生态特色:
-- 覆盖从端侧嵌入式设备到数据中心集群的完整参数梯度；
-- 在中文语言理解、多语言互译、复杂数学推演与代码编程上名列前茅；
-- Qwen2-VL：引入动态分辨率 ViT 机制，实现无损长宽比多模态感知与秒级视频定位；
-- QwQ / Qwen-Agent：提供从长链深度推理到企业级工具调用的完备开源生态。
+主要特点:
+- Constitutional AI (宪法 AI): 用一套成文准则让模型对自己的回答做自我批评和修正 (RLAIF)，减少人工标注依赖，同时避免生硬说教式的拒答
+- 真实软件工程能力强: 在 SWE-bench、复杂代码重构、前端界面还原与 Computer Use (直接看屏幕操作鼠标键盘) 上表现突出
+- 混合推理模式 (Extended Thinking): 支持在普通秒回模式与长思维链深度思考模式之间按需切换
 ```
 
-## 11.7 Mistral / Mixtral (Mistral AI)
+## 11.4 Gemini 1.5 / 2（Google）
 
-> 核心论文：[Mistral 7B](https://arxiv.org/abs/2310.06825) | [Mixtral 8x7B](https://arxiv.org/abs/2401.04088) | 开源权重：[mistralai](https://huggingface.co/mistralai)
+> 论文：[Gemini 1.0](https://arxiv.org/abs/2312.11805) | [Gemini 1.5](https://arxiv.org/abs/2403.05530)
+
+Google 的优势在于自研 TPU 集群与全模态长上下文架构：
+
+```
+底层结构: 原生多模态稀疏 MoE Transformer
+训练硬件: Google TPU v5p / v6e (Trillium) 集群
+
+主要特点:
+- 从头原生多模态: 从预训练起就把文本、图像、音频、视频帧混在同一个序列里训，而不是拿纯文本模型后期外挂视觉编码器
+- 1M-2M 超长上下文: Gemini 1.5 Pro 支持直接塞进 200 万 tokens (相当于 2 小时视频、几十小时录音或整个大型代码仓库)，长上下文检索准确率极高
+- Flash 系列: 针对高频低延迟场景深度优化的轻量 MoE 版本，性价比极高
+```
+
+## 11.5 GPT-4 / GPT-4o / o1 / o3（OpenAI）
+
+> 文档：[platform.openai.com](https://platform.openai.com/docs)
+
+OpenAI 先后探出了两条技术路线：GPT-4 跑通了超大规模预训练与 RLHF 对齐，而 o1/o3 开启了测试期算力扩展（Test-Time Compute Scaling）。
+
+```
+GPT-4 / GPT-4o:
+  - GPT-4 业界推测为 ~1.8T 参数的 MoE 模型 (16 个专家，每次激活 2 个)
+  - GPT-4o ("o" 代表 Omni) 打通了文本、视觉与实时语音的端到端统一表示，把语音对话延迟压到了两三百毫秒
+
+o1 / o3 系列 (Reasoning Models):
+  - 核心转向: 当预训练堆文本数据撞上墙后，把算力花在“强化学习后训练”和“推理阶段多想一会儿”上
+  - 训练机制: 通过大规模强化学习训练模型在输出最终答案前先生成长串隐式思维链 (Hidden CoT)，模型在思维链里学会自己拆解问题、试错、发现死胡同并掉头重试
+  - Test-Time Scaling: 给模型的思考时间 (Reasoning Tokens) 越多，在 AIME 数学竞赛、Codeforces 编程和 GPQA 科学难题上的准确率就越高
+  - o3 进一步支持在思维链内部穿插调用工具 (边想边搜网页、写 Python 代码跑计算、裁剪放大看图)
+```
+
+## 11.6 Qwen 2.5 / QwQ（Alibaba）
+
+> 论文：[Qwen2](https://arxiv.org/abs/2407.10671) | [Qwen2.5](https://arxiv.org/abs/2412.15115) | 权重：[Qwen](https://huggingface.co/Qwen)
+
+阿里的通义千问（Qwen）是目前开源社区尺寸最全、衍生模型最丰富的模型家族之一。
+
+```
+参数尺寸: 稠密模型覆盖 0.5B, 1.5B, 3B, 7B, 14B, 32B, 72B，另有 MoE 版本 (如 Qwen2.5-Turbo/Max)
+架构细节: GQA, RoPE, SwiGLU, 保留 Attention QKV Bias，采用 152K 大词表
+训练数据: 18T tokens，中英文与多语言综合质量高
+
+家族矩阵:
+- Qwen2.5-Coder (1.5B - 32B): 专攻代码生成与修复的开源主力
+- Qwen2.5-Math: 专攻数学推理与过程奖励模型 (PRM)
+- Qwen2-VL / Qwen2.5-VL: 原生动态分辨率与多模态理解标杆
+- QwQ-32B: 基于强化学习训练的开源推理模型，32B 体积即可在数学与代码推理上逼近数倍体积的大模型
+```
+
+## 11.7 Mistral / Mixtral（Mistral AI）
+
+> 论文：[Mistral 7B](https://arxiv.org/abs/2310.06825) | [Mixtral 8x7B](https://arxiv.org/abs/2401.04088) | 权重：[mistralai](https://huggingface.co/mistralai)
+
+欧洲开源代表 Mistral AI 早期推动了滑动窗口注意力与开源 MoE 的普及：
 
 ```
 Mistral 7B:
-  开创性引入滑动窗口注意力 (Sliding Window Attention) 与 GQA，以 7B 参数规模在通用基准上全面超越 LLaMA 2 13B。
+  引入滑动窗口注意力 (Sliding Window Attention, SWA) 与 GQA，用 7B 参数打平甚至反超早期的 LLaMA-2-13B
 
 Mixtral 8x7B / 8x22B:
-  开源领域首个工业级稀疏 MoE 架构，8 专家配置下每次激活 2 个专家（47B 总参数，单 Token 激活 13B），在推理效率与生成质量间达成极佳平衡。
+  引爆开源 MoE 热潮的代表作。每层 8 个专家，每个 token 路由激活 2 个专家 (8x7B 总参数 47B，实际激活仅 13B)
 
-Mistral Large 2:
-  123B 稠密前沿基座，展现出极强的推理严密性、高级代码开发与多语言交互能力。
+Mistral Small 3 / Large 2:
+  回归高密度稠密模型 (24B / 123B)，主打低延迟指令遵循、多语言与代码能力
 ```
 
-## 11.8 小型语言模型演进 (Small Language Models, SLMs)
+## 11.8 端侧小模型（Small Language Models, SLMs）
 
-| 模型体系 | 核心参数量 | 语料特性与合成策略 | 核心特质与应用定位 |
-|---------|-----------|------------------|------------------|
-| [**Phi-3 / 3.5**](https://arxiv.org/abs/2404.14219) (Microsoft) | 3.8B / 14B | 极致清洗的“教科书级”合成语料 | 证明极小参数结合高密度数据可比肩数倍体积的大模型 |
-| [**Gemma 2**](https://arxiv.org/abs/2408.00118) (Google) | 2B / 9B / 27B | 大规模蒸馏与深层知识注入 | 引入 QK-Norm、滑动局部注意力与 Logit 软截断 |
-| [**SmolLM2**](https://huggingface.co/HuggingFaceTB/SmolLM2-1.7B) (HuggingFace) | 135M / 360M / 1.7B | FineWeb-Edu 优质教育语料 | 针对边缘设备与浏览器 WebGPU 本地运行极致优化 |
-| [**TinyLlama**](https://github.com/jzhang38/TinyLlama) | 1.1B | 3T Tokens 充分过训练 | 开源教学、小型嵌入式设备轻量运行范例 |
+随着数据清洗与合成数据技术成熟，1B 到 4B 级别的小模型已经能在手机、笔记本电脑甚至浏览器里跑出以前 13B 模型的水平：
 
-**工业范式启示**：高质量合成语料清洗结合超额训练（Over-training），正驱动小型语言模型在手机、PC 与智能汽车等端侧边缘场景释放出巨大的实用价值。
+| 模型 | 参数量 | 数据与训练特点 | 适用定位 |
+|------|--------|---------|------|
+| [**Phi-3 / Phi-4**](https://arxiv.org/abs/2404.14219) (Microsoft) | 3.8B / 14B | 重度依赖精筛网页与大模型生成的“教科书级”合成推理语料 | 逻辑、数学与代码得分远超同尺寸模型 |
+| [**Gemma 2**](https://arxiv.org/abs/2408.00118) (Google) | 2B / 9B / 27B | 放弃死磕纯 Cross-Entropy 预训练，全程用大模型的输出概率分布做知识蒸馏 (Logit Distillation)，并加入局部滑动注意力与 Logit Soft-Capping | 同体积下对话质感与指令遵循极稳 |
+| [**SmolLM2**](https://huggingface.co/HuggingFaceTB/SmolLM2-1.7B) (HuggingFace) | 135M / 360M / 1.7B | 公开完整的预训练数据配方（FineWeb-Edu、DCLM、Stack-Edu），过训练 11T tokens | 极小体积端侧部署与科研复现参考 |
+| [**TinyLlama**](https://github.com/jzhang38/TinyLlama) | 1.1B | 用 3T tokens 把 1.1B 小模型喂饱 | 投机采样草稿模型、教学实验 |
+
+**核心规律**：小模型的容量有限，记不住海量冷门百科事实（World Knowledge），但如果用大模型帮它把脏数据洗干净、改写成推理严密的合成教材，或者直接用大模型做 Logit 蒸馏，小模型也能具备相当强的逻辑推理与读写能力。
 
 ## 关键论文
 
-- [Llama Team (2024) — Llama 3 Technical Report](https://arxiv.org/abs/2407.21783): 405B 万卡超大规模预训练与后训练全景解析
-- [DeepSeek-AI (2024) — DeepSeek-V3 Technical Report](https://arxiv.org/abs/2412.19437): 细粒度 MoE、MLA 机制与 FP8 全流程训练
-- [DeepSeek-AI (2025) — DeepSeek-R1](https://arxiv.org/abs/2501.12948): 纯可验证强化学习激发长思维链推理
-- [Qwen Team (2024) — Qwen2.5 Technical Report](https://arxiv.org/abs/2412.15115): 全谱系通用开源模型架构与多语言实践
-- [Jiang et al. (2024) — Mixtral of Experts](https://arxiv.org/abs/2401.04088): 现代开源稀疏混合专家网络
+- [OpenAI (2023): GPT-4 Technical Report](https://arxiv.org/abs/2303.08774)：展示预训练算力预测（Predictable Scaling）与多模态评测结果。
+- [Mistral AI (2023): Mistral 7B](https://arxiv.org/abs/2310.06825) & [Mixtral of Experts (2024)](https://arxiv.org/abs/2401.04088)：小模型架构优化与开源稀疏 MoE 代表作。
+- [Llama Team (2024): The Llama 3 Herd of Models](https://arxiv.org/abs/2407.21783)：长达 90 多页的工程百科全书，详述了 15T 数据清洗、1.6 万卡集群故障容错与多轮 DPO 后训练。
+- [DeepSeek-AI (2024): DeepSeek-V3 Technical Report](https://arxiv.org/abs/2412.19437)：详解 MLA、无辅助损失 MoE、FP8 训练与 DualPipe 通信重叠。
+- [DeepSeek-AI (2025): DeepSeek-R1](https://arxiv.org/abs/2501.12948)：公开如何使用强化学习（GRPO）激发出长思维链推理能力与蒸馏小模型的方法。
+- [Qwen Team (2024): Qwen2.5 Technical Report](https://arxiv.org/abs/2412.15115)：全尺寸开源模型家族的数据配比与后训练细节。
 
-## 进阶参考
+## 进一步阅读
 
-- HuggingFace: [Open LLM Leaderboard](https://huggingface.co/spaces/open-llm-leaderboard/open_llm_leaderboard)（全维度开源模型客观评测基准）
-- LMSYS: [Chatbot Arena 竞技场](https://lmarena.ai/)（真实人类偏好对战排名）
-- 各大前沿模型官方 Model Card 与开源技术文档
+- [Open LLM Leaderboard](https://huggingface.co/spaces/open-llm-leaderboard/open_llm_leaderboard)：开源模型客观指标对比。
+- [Chatbot Arena (LMArena)](https://lmarena.ai/)：闭源与开源模型同台盲测榜单。
+- Sebastian Raschka: [The Big LLM Architecture Comparison](https://magazine.sebastianraschka.com/)：主流开源大模型架构细节图文对比。
 
-## 实践训练
+## 练习题
 
-1. **技术报告研读与架构解构**：深入精读 LLaMA 3 或 DeepSeek-V3 官方技术报告，系统梳理其在数据清洗过滤、并行切分拓扑与后训练偏好对齐维度的关键工程决策。
-2. **同量级模型多任务盲测**：在固定的指令测试集（涵盖代码生成、逻辑推演、信息提取与多语言翻译）上，以盲测方式横向对比 LLaMA-3-8B 与 Qwen2.5-7B 的生成质量并记录评测分。
-3. **关键算子微型复现**：挑选前沿模型的一项关键技术（如 YaRN 频率调制、MLA 潜变量投影或 MTP 多词元预测），在微型 Transformer 上编写最小可运行实现并验证其有效性。
+1. **精读一篇技术报告**：从 `Llama 3`、`DeepSeek-V3`、`DeepSeek-R1` 或 `Qwen2.5` 的技术报告中任选一篇从头读到尾，整理一份包含数据清洗流水线、模型结构超参数、训练并行策略与后训练阶段划分的读书笔记。
+2. **同尺寸模型盲测**：选 10 道你自己平时工作常遇到的真实问题（如写脚本、改 bug、中英互译、总结长文），隐去模型名字对比 `Llama-3.1-8B`、`Qwen2.5-7B` 和 `Gemma-2-9B` 的回答质量。
+3. **动手复现一个模块**：挑选 DeepSeek-V3 里的一个具体设计（如无辅助损失的动态偏置路由，或 Multi-Token Prediction 头），用几十行 PyTorch 写一个最小可运行模块。
 
 ---
 
