@@ -94,7 +94,7 @@ ZeRO Stage 2: 切分优化器状态 + 梯度 (Gradients)
 
 ZeRO Stage 3: 切分优化器状态 + 梯度 + 模型参数 (Parameters)
   → 静态显存降为原来的 1/N (N 为 GPU 数量)
-  → 前向和反向算到某一层时，临时用 AllGather 从各卡凑齐该层完整权重，算完立刻释放
+  → 前向和反向算到某一层时，临时用 AllGather 从各卡收集该层完整权重，算完立刻释放
   → 相当于 PyTorch 的 FSDP (Fully Sharded Data Parallel)
 ```
 
@@ -159,7 +159,7 @@ GPU 3: Layers 24-31  (Stage 3)
 **核心问题**：朴素的流水线并行会产生大量“气泡”（Bubble，即下游卡干等上游卡算完的空闲时间）。
 
 **消除气泡的调度改进**：
-- **GPipe**（[Huang et al., 2019](https://arxiv.org/abs/1811.06965)）：把一个大 batch 拆成多个小 micro-batch 连续塞进流水线，把空闲气泡摊薄；但所有 micro-batch 的前向激活都要攒到反向传播时才能释放，显存占用高。
+- **GPipe**（[Huang et al., 2019](https://arxiv.org/abs/1811.06965)）：把一个大 batch 拆成多个小 micro-batch 连续送入流水线，把空闲气泡摊薄；但所有 micro-batch 的前向激活都要攒到反向传播时才能释放，显存占用高。
 - **1F1B（One-Forward-One-Backward）**：流水线跑满后，每张卡严格按照“算一个 micro-batch 的前向、紧接着算一个 micro-batch 的反向”交替执行，算完反向立刻释放对应的前向激活，大幅省下激活显存：
   ```
   Stage 0: F0 F1 F2 F3 B0 B1 B2 B3   (朴素 GPipe，激活全攒着)
@@ -170,7 +170,7 @@ GPU 3: Layers 24-31  (Stage 3)
 
 ### 6.2.5 上下文并行 (Context Parallelism, CP)
 
-当训练序列拉长到 128K 甚至 1M token 时，哪怕模型参数切得再细，单条长序列的中间激活值也会撑爆单卡显存。上下文并行（CP）直接沿着**序列长度维度**把输入切分到多张卡上：
+当训练序列拉长到 128K 甚至 1M token 时，哪怕模型参数切得再细，单条长序列的中间激活值也会超出单卡显存。上下文并行（CP）直接沿着**序列长度维度**把输入切分到多张卡上：
 
 ```
 序列长度 128K，切分到 4 张卡:
@@ -328,7 +328,7 @@ def async_save_checkpoint(model, optimizer, step):
     # 交给后台线程慢慢写入磁盘或对象存储，GPU 继续跑下一步
     threading.Thread(target=torch.save, args=(state, f"ckpt_{step}.pt")).start()
 
-# 2. 分布式 Checkpoint (每张卡只存自己负责的 shard，避免单节点汇总撑爆内存)
+# 2. 分布式 Checkpoint (每张卡只存自己负责的 shard，避免单节点汇总时内存不足)
 from torch.distributed.checkpoint import save, load, FileSystemWriter
 save(model.state_dict(), storage_writer=FileSystemWriter(path))
 ```

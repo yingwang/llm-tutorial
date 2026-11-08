@@ -14,7 +14,7 @@ Loss = -Σ log P(x_t | x_1, ..., x_{t-1})
 ```
 
 **为什么预测下一个词这么有效**：
-- **压缩即理解**：想要准确猜出下一处该填什么词，模型不能只靠死记硬背，还必须顺带学会语法结构、事实知识、上下文指代甚至逻辑推理；
+- **压缩即理解**：想要准确预测下一处该填什么词，模型不能只靠死记硬背，还必须顺带学会语法结构、事实知识、上下文指代甚至逻辑推理；
 - **纯自监督学习**：不需要人工打标签，互联网上的海量文本直接就能拿来当训练样本；
 - **可持续扩展**：这个简单的目标配合更大的模型、更多的数据和算力，能力可以沿着 Scaling Law 持续提升。
 
@@ -193,14 +193,14 @@ Warmup (预热) → 保持恒定学习率（占主体训练时间）→ 最后�
 
 ### 3.3.3 训练稳定性
 
-大规模预训练动辄跑几周甚至几个月，途中经常会遇到 Loss 突然暴涨（Loss Spike）甚至变成 `NaN` 的情况。
+大规模预训练动辄跑几周甚至几个月，途中经常会遇到 Loss 突然急剧上升（Loss Spike）甚至变成 `NaN` 的情况。
 
 **常见原因与应对手段**：
 
 | 问题 | 症状 | 解决方案 |
 |------|------|---------|
-| 梯度爆炸 | 梯度范数暴涨，Loss 突然变 NaN/Inf | 开启梯度裁剪 `gradient clipping (max_norm=1.0)` |
-| 脏数据批次 | 遇到某个 Batch 后 Loss 飙升，随后慢慢恢复 | 检测并自动跳过异常 Batch，排查对应数据分片 |
+| 梯度爆炸 | 梯度范数急剧增大，Loss 突然变 NaN/Inf | 开启梯度裁剪 `gradient clipping (max_norm=1.0)` |
+| 脏数据批次 | 遇到某个 Batch 后 Loss 骤升，随后慢慢恢复 | 检测并自动跳过异常 Batch，排查对应数据分片 |
 | 学习率偏高 | Loss 频繁出现尖峰震荡 | 调低峰值学习率，或把 AdamW 的 $\beta_2$ 从 0.999 降到 0.95 |
 | 注意力数值发散 | 深层 QK 点积过大导致 Softmax 饱和 | 给 Q 和 K 加 RMSNorm（QK-Norm），或做 Logit Soft-Capping |
 | 低精度溢出 | Embedding 层或输出层数值越界 | 保持 Embedding 与 LM Head 的计算在 FP32 下进行 |
@@ -221,9 +221,10 @@ Warmup (预热) → 保持恒定学习率（占主体训练时间）→ 最后�
 
 **Batch Size Warmup**：训练刚起步时梯度方向变化快，先用较小的全局 Batch Size（如 4M Tokens）跑完早期阶段，中后期再逐步放大到 16M–60M Tokens，兼顾早期收敛速度与后期的多卡并行吞吐。
 
-**临界批次大小（Critical Batch Size）**（[McCandlish et al., 2018](https://arxiv.org/abs/1812.06162)）：当 Batch Size 小于临界值时，加倍 Batch Size 差不多能把训练步数减半（近乎线性加速）；一旦超过临界值，继续靠堆卡增大 Batch Size 只会带来梯度信息冗余，算力利用率显著下降：
+**临界批次大小（Critical Batch Size）**（[McCandlish et al., 2018](https://arxiv.org/abs/1812.06162)）：当 Batch Size 小于临界值时，加倍 Batch Size 差不多能把训练步数减半（近乎线性加速）；一旦超过临界值，继续靠增加 GPU 数量增大 Batch Size 只会带来梯度信息冗余，算力利用率显著下降：
 ```
-B_crit ≈ B_noise / L   # B_noise 是梯度噪声规模，L 是当前 loss
+B_crit ≈ B_simple = tr(Σ) / |G|²  # McCandlish et al. 的简化梯度噪声尺度：Σ 为单样本梯度协方差，G 为真实梯度
+B_crit(L) ≈ B* / L^(1/α_B)        # Kaplan et al. (2020) 的经验拟合：B* ≈ 2e8 tokens，α_B ≈ 0.21
 ```
 随着训练推进、Loss $L$ 不断下降，临界批次大小 $B_{\text{crit}}$ 会自然变大，这也解释了为什么训练中后期可以把 Batch Size 调得更大。
 
@@ -239,15 +240,19 @@ B_crit ≈ B_noise / L   # B_noise 是梯度噪声规模，L 是当前 loss
 
 **混合精度训练（Mixed Precision Training）**（[Micikevicius et al., 2018](https://arxiv.org/abs/1710.03740)）：
 ```python
-# PyTorch AMP 示例
+# PyTorch AMP 示例（BF16 指数位与 FP32 相同，不需要 GradScaler）
 with torch.autocast(device_type='cuda', dtype=torch.bfloat16):
     output = model(input)
     loss = criterion(output, target)
 
 # 前向与反向用 BF16 加速，优化器用 FP32 主权重更新
-scaler.scale(loss).backward()
-scaler.step(optimizer)
-scaler.update()
+loss.backward()
+optimizer.step()
+optimizer.zero_grad()
+
+# 若改用 FP16（dtype=torch.float16），则需要损失缩放：
+# scaler = torch.amp.GradScaler('cuda')
+# scaler.scale(loss).backward(); scaler.step(optimizer); scaler.update()
 ```
 
 **FP8 训练**（H100 / B200）：

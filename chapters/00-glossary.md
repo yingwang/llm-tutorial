@@ -39,7 +39,7 @@
 - **GRPO (Group Relative Policy Optimization)**：DeepSeekMath 与 DeepSeek-R1 采用的强化学习算法，对同一提示采样一组回答，用组内相对得分代替独立的 Critic 模型来估计优势。
 - **KTO (Kahneman-Tversky Optimization)**：只需要对单条回答给出好或坏的二元反馈即可训练，不要求成对的偏好比较数据。
 - **Reward Model (RM)**：给模型回答打分的评估模型，通常在预训练基座顶部换上标量输出头训练而成。
-- **KL 惩罚**：强化学习阶段在目标函数里加入的 KL 散度约束，防止当前策略偏离 SFT 参考模型太远、出现钻奖励空子（Reward Hacking）的现象。
+- **KL 惩罚**：强化学习阶段在目标函数里加入的 KL 散度约束，防止当前策略偏离 SFT 参考模型太远、出现利用奖励漏洞（Reward Hacking）的现象。
 - **Constitutional AI**：给定一套行为准则，让模型对自己的回答做批评和改写，再拿这些生成的数据做对齐训练。
 
 ## 参数高效微调 (PEFT)
@@ -71,8 +71,8 @@
 - **KV Cache**：自回归生成时把历史 Token 算出的 Key 和 Value 张量缓存在显存里，后续每步只需计算最新 Token，避免重复前向计算。
 - **PagedAttention**：vLLM 核心机制，借鉴操作系统的虚拟内存分页管理，把 KV Cache 拆成固定大小的块按需分配，基本消除显存碎片。
 - **Continuous Batching**：按单步迭代动态管理请求队列，已生成完的请求立刻退出、新到达的请求随时插入，大幅提高推理吞吐。
-- **Speculative Decoding（投机采样）**：先用轻量草稿模型快速连猜几个 Token，再交由主模型一次前向并行验证，在不改变输出分布的前提下降低解码延迟。
-- **Medusa**：在主模型顶部直接加几个并行的预测头来猜测后续 Token，不需要额外部署独立的草稿模型。
+- **Speculative Decoding（投机采样）**：先用轻量草稿模型快速连续预测几个 Token，再交由主模型一次前向并行验证，在不改变输出分布的前提下降低解码延迟。
+- **Medusa**：在主模型顶部直接加几个并行的预测头来预测后续 Token，不需要额外部署独立的草稿模型。
 - **Prefix Caching**：跨请求缓存并复用公共前缀（如长 System Prompt 或共享文档）的 KV Cache，减少首字延迟（TTFT）和重复算力开销。
 - **量化 (Quantization)**：把模型权重或激活值从 FP16/BF16 压缩到 INT8、INT4 或 FP8，大幅降低显存占用和访存带宽需求。
 - **GPTQ / AWQ**：常用的后训练量化（PTQ）算法；GPTQ 利用二阶海森矩阵逐列补偿误差，AWQ 则根据激活值幅度重点保护约 1% 的关键权重通道。

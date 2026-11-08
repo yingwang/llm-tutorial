@@ -111,7 +111,7 @@ def bt_loss(reward_chosen, reward_rejected):
 - 每个样本通常会分给 3–5 名标注员独立判断，取多数一致的结果入库。
 
 **Reward Model 常见的问题**：
-- **钻奖励空子（Reward Hacking）**：策略模型在强化学习过程中很容易摸出 RM 的评分癖好，比如不管问什么都写得又臭又长、拼命列序号、堆砌漂亮的过渡词，把 RM 分数刷得很高，实际回答却变得啰嗦空洞；
+- **利用奖励漏洞（Reward Hacking）**：策略模型在强化学习过程中很容易摸出 RM 的评分癖好，比如不管问什么都写得冗长、拼命列序号、堆砌漂亮的过渡词，把 RM 分数抬得很高，实际回答却变得冗余空洞；
 - **过优化（Over-optimization）**：随着 PPO 把 RM 得分越推越高，真实人类评估效果会先升后降（[Gao et al., 2023](https://arxiv.org/abs/2210.10760)）；
 - **分布偏移（Distribution Shift）**：RM 是在旧版 SFT 模型的输出分布上训练出来的，等策略模型更新几百步之后，面对新分布下的古怪输出，RM 往往会打错分。
 
@@ -125,7 +125,7 @@ L = E[min(r_t * A_t, clip(r_t, 1-ε, 1+ε) * A_t)]
 
 # r_t = π_θ(a|s) / π_θ_old(a|s)  # 重要性采样比率
 # A_t = advantage estimate (由价值网络 Critic 配合 GAE 估计)
-# ε = 0.2 typically (裁剪幅度范围，防止单步更新过猛)
+# ε = 0.2 typically (裁剪幅度范围，防止单步更新幅度过大)
 
 # KL 惩罚项防止策略模型偏离 SFT 基准太远:
 reward_total = reward_rm - β * KL(π_θ || π_ref)
@@ -217,7 +217,7 @@ Step 3: RL from AI Feedback (RLAIF)
 
 ## 4.6 RLVR (Reinforcement Learning with Verifiable Rewards)
 
-**[DeepSeek-R1](https://arxiv.org/abs/2501.12948) 的关键突破**：在数学、代码、逻辑推理这类有客观标准答案的任务上，完全不用容易被钻空子的人类偏好神经网络 RM，而是直接拿**可验证的客观结果**（Verifiable Rewards）当奖励信号：
+**[DeepSeek-R1](https://arxiv.org/abs/2501.12948) 的关键突破**：在数学、代码、逻辑推理这类有客观标准答案的任务上，完全不用容易被策略模型利用漏洞的人类偏好神经网络 RM，而是直接拿**可验证的客观结果**（Verifiable Rewards）当奖励信号：
 
 ```
 对于数学题:
@@ -246,7 +246,7 @@ Step 3: RL from AI Feedback (RLAIF)
 
 常用的训练与搜索手段包括：
 1. **RLVR（可验证结果奖励）**：只管最终答案对不对和格式合不合规，靠 GRPO 等算法让模型自己在试错中摸索出有效的长思维链；
-2. **Process Reward Model (PRM)**（[Lightman et al., 2023](https://arxiv.org/abs/2305.20050)）：给推导过程中的每一步单独打分，而不是只看最后结果（Outcome Reward Model, ORM），能及时揪出“中间过程算错、最后碰巧蒙对”的情况；
+2. **Process Reward Model (PRM)**（[Lightman et al., 2023](https://arxiv.org/abs/2305.20050)）：给推导过程中的每一步单独打分，而不是只看最后结果（Outcome Reward Model, ORM），能及时揪出“中间过程算错、最后碰巧答对”的情况；
 3. **搜索与拒绝采样**：结合蒙特卡洛树搜索（MCTS）或 Best-of-N 采样生成高质量长推理轨迹，再用来反哺模型或蒸馏给小模型。
 
 ### 4.7.2 Test-Time Compute Scaling

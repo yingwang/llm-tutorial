@@ -8,7 +8,7 @@
 
 > 论文：[The Llama 3 Herd of Models](https://arxiv.org/abs/2407.21783) | 权重：[meta-llama](https://huggingface.co/meta-llama)
 
-LLaMA 3 选择了最稳妥的工程路线：不在模型结构上搞激进改动（连 MoE 都没上），而是靠扎实的稠密（Dense）Transformer 结构、15T 高质量 token 和 1.6 万张 H100 的工程稳定性把效果推到上限。
+LLaMA 3 选择了最稳妥的工程路线：不在模型结构上做激进改动（连 MoE 都没上），而是靠扎实的稠密（Dense）Transformer 结构、15T 高质量 token 和 1.6 万张 H100 的工程稳定性把效果推到上限。
 
 ```
 参数规模: 8B, 70B, 405B (后续推出蒸馏优化版 3.3-70B 与端侧版 3.2-1B/3B)
@@ -84,7 +84,7 @@ Google 的优势在于自研 TPU 集群与全模态长上下文架构：
 
 主要特点:
 - 从头原生多模态: 从预训练起就把文本、图像、音频、视频帧混在同一个序列里训，而不是拿纯文本模型后期外挂视觉编码器
-- 1M-2M 超长上下文: Gemini 1.5 Pro 支持直接塞进 200 万 tokens (相当于 2 小时视频、几十小时录音或整个大型代码仓库)，长上下文检索准确率极高
+- 1M-2M 超长上下文: Gemini 1.5 Pro 支持直接输入 200 万 tokens (相当于 2 小时视频、几十小时录音或整个大型代码仓库)，长上下文检索准确率极高
 - Flash 系列: 针对高频低延迟场景深度优化的轻量 MoE 版本，性价比极高
 ```
 
@@ -148,9 +148,9 @@ Mistral Small 3 / Large 2:
 | 模型 | 参数量 | 数据与训练特点 | 适用定位 |
 |------|--------|---------|------|
 | [**Phi-3 / Phi-4**](https://arxiv.org/abs/2404.14219) (Microsoft) | 3.8B / 14B | 重度依赖精筛网页与大模型生成的“教科书级”合成推理语料 | 逻辑、数学与代码得分远超同尺寸模型 |
-| [**Gemma 2**](https://arxiv.org/abs/2408.00118) (Google) | 2B / 9B / 27B | 放弃死磕纯 Cross-Entropy 预训练，全程用大模型的输出概率分布做知识蒸馏 (Logit Distillation)，并加入局部滑动注意力与 Logit Soft-Capping | 同体积下对话质感与指令遵循极稳 |
+| [**Gemma 2**](https://arxiv.org/abs/2408.00118) (Google) | 2B / 9B / 27B | 2B 与 9B 不再只用纯 Cross-Entropy 预训练，而是全程用更大教师模型的输出概率分布做知识蒸馏 (Logit Distillation)，27B 仍按常规方式从头训练；并加入局部滑动注意力与 Logit Soft-Capping | 同体积下对话质感与指令遵循极稳 |
 | [**SmolLM2**](https://huggingface.co/HuggingFaceTB/SmolLM2-1.7B) (HuggingFace) | 135M / 360M / 1.7B | 公开完整的预训练数据配方（FineWeb-Edu、DCLM、Stack-Edu），过训练 11T tokens | 极小体积端侧部署与科研复现参考 |
-| [**TinyLlama**](https://github.com/jzhang38/TinyLlama) | 1.1B | 用 3T tokens 把 1.1B 小模型喂饱 | 投机采样草稿模型、教学实验 |
+| [**TinyLlama**](https://github.com/jzhang38/TinyLlama) | 1.1B | 用 3T tokens 充分训练 1.1B 小模型 | 投机采样草稿模型、教学实验 |
 
 **核心规律**：小模型的容量有限，记不住海量冷门百科事实（World Knowledge），但如果用大模型帮它把脏数据洗干净、改写成推理严密的合成教材，或者直接用大模型做 Logit 蒸馏，小模型也能具备相当强的逻辑推理与读写能力。
 

@@ -48,12 +48,12 @@
 - **InternViT / DINOv2**：前者是参数量高达 6B 的大尺寸视觉底座；后者靠自监督学习，空间几何与局部细节还原更好。
 
 **高分辨率处理（Dynamic Resolution / AnyRes）**：
-早期 CLIP 只吃固定的 $224 \times 224$ 或 $336 \times 336$ 方图，遇到长条形网页截图或密密麻麻的 PDF 文档，强行缩放就会糊成一团。现在主流模型采用两种办法：
-1. **动态切块（Tile Splitting，如 LLaVA-NeXT、InternVL）**：按原图长宽比切成多个标准小块（比如 $2 \times 2$ 共 4 块）分别过 ViT，再加上一张缩略图提供全局视野。一张 $672 \times 672$ 的图会变成 $(4+1) \times 256 = 1280$ 个视觉 token。
+早期 CLIP 只吃固定的 $224 \times 224$ 或 $336 \times 336$ 方图，遇到长条形网页截图或密密麻麻的 PDF 文档，强行缩放就会模糊不清。现在主流模型采用两种办法：
+1. **动态切块（Tile Splitting，如 LLaVA-NeXT、InternVL）**：按原图长宽比切成多个标准小块（比如 $2 \times 2$ 共 4 块）分别过 ViT，再加上一张缩略图提供全局视野。以 336 输入、patch 14 的 ViT 为例，每块产生 $24 \times 24 = 576$ 个 token，一张 $672 \times 672$ 的图切成 4 块再加缩略图，共 $(4+1) \times 576 = 2880$ 个视觉 token。
 2. **原生动态分辨率（Naive Dynamic Resolution，如 Qwen2-VL）**：去掉绝对位置编码，改用 2D-RoPE，直接把任意长宽比的图片按原始分辨率切成 patch 送进 ViT。
 
 **视觉 Token 压缩**：
-分辨率一高，单张图就会产生两三千个 token，传十张图或者一段视频就会撑爆显存。常见压缩手段包括：
+分辨率一高，单张图就会产生两三千个 token，传十张图或者一段视频就会超出显存。常见压缩手段包括：
 - **Pixel Shuffle / 空间池化**：把相邻 $2 \times 2$ 的 4 个视觉 token 在通道维拼起来再过一层线性投影压成 1 个，token 数直接减少 75%（InternVL、Qwen2-VL 均采用此法）。
 - **Perceiver Resampler / Q-Former**：用固定数量（如 64 个）的可学习查询向量去和视觉特征做交叉注意力，不管原图多大都只抽出 64 个 token。缺点是容易丢掉细碎文字信息。
 
@@ -192,7 +192,7 @@ Audio → Audio Encoder (如 Whisper Encoder) → Projector → LLM (与文本�
   把相邻两帧的同位置像素打包成一个 3D 立方块 (Tubelet)，在编码阶段直接融掉一半时间步
 
 做法三: 原生百万级上下文硬吃 (如 Gemini 1.5 Pro)
-  依靠 Ring Attention 等长序列架构，把整段 1 小时视频的所有帧和音频直接塞进 2M 上下文窗口
+  依靠 Ring Attention 等长序列架构，把整段 1 小时视频的所有帧和音频直接放进 2M 上下文窗口
 ```
 
 ### 9.4.2 视频生成（Video Generation）
@@ -233,7 +233,7 @@ Audio → Audio Encoder (如 Whisper Encoder) → Projector → LLM (与文本�
 ```
 
 实现这类端到端模型需要解决三个工程问题：
-1. **跨模态对齐而不伤智商**：早期把语音和图像直接混进 LLM 训练时，经常发现模型的纯文本逻辑推理能力明显退化，需要精细设计多阶段解耦训练或双流架构（如 Qwen2.5-Omni 的 Thinker-Talker 架构，一个大脑负责思考文本，另一个轻量头负责实时合成语音流）。
+1. **跨模态对齐而不损害语言能力**：早期把语音和图像直接混进 LLM 训练时，经常发现模型的纯文本逻辑推理能力明显退化，需要精细设计多阶段解耦训练或双流架构（如 Qwen2.5-Omni 的 Thinker-Talker 架构，一个大脑负责思考文本，另一个轻量头负责实时合成语音流）。
 2. **流式全双工交互**：模型在说话的同时还要持续监听麦克风输入，一旦用户插话就立刻停下重听。
 3. **帧率控制**：把每秒语音压到 12.5Hz 或 25Hz 的极低帧率离散 token，才能让自回归生成跑赢实时播放速度。
 
@@ -251,6 +251,7 @@ Audio → Audio Encoder (如 Whisper Encoder) → Projector → LLM (与文本�
 - [LLaVA 开源仓库](https://github.com/haotian-liu/LLaVA)：代码简洁，适合入门多模态两阶段训练。
 - [Cambrian-1](https://arxiv.org/abs/2406.16860)：对各种视觉编码器、连接器与训练配方的系统性消融实验报告。
 - [Qwen2-VL 技术报告](https://arxiv.org/abs/2409.12191)：原生动态分辨率与 2D/3D-RoPE 的实现细节。
+- [Transfusion](https://arxiv.org/abs/2408.11039)：在同一个 Transformer 里对文本做下一个 token 预测、对图像 patch 做扩散的统一模型。
 
 ## 练习题
 

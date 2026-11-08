@@ -14,14 +14,14 @@
   - 精读《Attention Is All You Need》与 GPT-2 论文
   - 跟着 Karpathy 的视频从头敲一遍 nanoGPT 代码
 
-□ 搞懂 Tokenizer
+□ 理解 Tokenizer
   - 用 HuggingFace tokenizers 在自己的文本语料上训一个 BPE 分词器
   - 读懂 Byte-level BPE 与 SentencePiece (Unigram) 的区别
   - 观察不同语言和代码的 token 压缩率 (Fertility)
 
 □ 熟练掌握 PyTorch 训练细节
   - 自己手写完整的训练循环 (前向、loss、backward、梯度裁剪、混合精度 AMP、余弦学习率调度)
-  - 搞清楚 Autograd 计算图与显存占用分布 (权重、梯度、Adam 优化器状态、激活值各占多少字节)
+  - 理解 Autograd 计算图与显存占用分布 (权重、梯度、Adam 优化器状态、激活值各占多少字节)
   - 熟练使用 Dataset、DataLoader 与 `np.memmap` 读取大规模二进制语料
 ```
 
@@ -36,7 +36,7 @@
   - 推荐参考代码: nanoGPT, litgpt
 
 □ 多卡并行训练
-  - 从单机多卡 DDP (DistributedDataParallel) 练起，搞懂 All-Reduce 梯度同步
+  - 从单机多卡 DDP (DistributedDataParallel) 练起，理解 All-Reduce 梯度同步
   - 切换到 FSDP (或 DeepSpeed ZeRO-2 / ZeRO-3)，对比切分优化器状态前后的显存变化
   - 弄明白机内通信 (NVLink) 与跨机通信 (InfiniBand / RoCE) 的带宽差距
 
@@ -50,7 +50,7 @@
 □ SFT 指令微调
   - 熟悉 HuggingFace TRL、Axolotl 或 LLaMA-Factory
   - 用 LoRA / QLoRA 在单张显卡上微调一个 7B/8B 开源基座 (如 Qwen2.5-7B 或 Llama-3.1-8B)
-  - 搞清楚 Chat Template 特殊 token 的拼接格式，确认只对 assistant 回复部分算 Loss (Loss Masking)
+  - 理解 Chat Template 特殊 token 的拼接格式，确认只对 assistant 回复部分算 Loss (Loss Masking)
   - 理解多样本拼接 (Sequence Packing) 为什么能避免 Padding 浪费
 
 □ DPO 偏好对齐
@@ -67,7 +67,7 @@
 ```
 □ 高性能推理与部署
   - 用 vLLM 或 SGLang 把微调好的模型部署成 OpenAI 兼容 API，用压测脚本测并发吞吐
-  - 用 AWQ 或 GPTQ 把模型压到 4-bit，对比量化前后的显存占用、吐字速度与榜单掉点
+  - 用 AWQ 或 GPTQ 把模型压到 4-bit，对比量化前后的显存占用、生成速度与榜单掉点
   - 配置投机采样 (Speculative Decoding) 测试低并发下的加速比
 
 □ 检索增强生成 (RAG)
@@ -169,7 +169,7 @@
 | 课程 | 平台 / 讲师 | 特点 |
 |------|------|------|
 | [Neural Networks: Zero to Hero](https://www.youtube.com/playlist?list=PLAqhIrjkxbuWI23v9cThsA9GvCAUhRvKZ) | YouTube (Andrej Karpathy) | 最好的动手入门课，从自动求导一直讲到手写 GPT-2 和 Tokenizer |
-| [Stanford CS336: Language Modeling from Scratch](https://stanford-cs336.github.io/spring2024/) | Stanford | 专门讲怎么从零写数据清洗、分词、Transformer、并行训练和对齐的硬核工程课 |
+| [Stanford CS336: Language Modeling from Scratch](https://stanford-cs336.github.io/spring2024/) | Stanford | 专门讲怎么从零写数据清洗、分词、Transformer、并行训练和对齐的深入工程课 |
 | [Stanford CS224N](https://web.stanford.edu/class/cs224n/) | Stanford (Chris Manning) | NLP 与深度学习基础名课 |
 | [CMU 11-868: Large Language Models](https://llms-11-868.github.io/) | CMU | 偏系统和最新前沿论文精读 |
 | [LLM Course](https://github.com/mlabonne/llm-course) | GitHub (Maxime Labonne) | 偏重开源微调、量化、合并实战的免费教程 |
@@ -215,12 +215,12 @@
 
 | 模型规模 | GPU 配置 | 训练 Token 数 | 预估耗时 | 预估云租卡账单 |
 |----------|-----|---------|--------|------|
-| 124M (GPT-2 small) | 1× RTX 4090 | 10B | ~8 小时 | ~$5 |
-| 1B | 1× A100 80GB | 20B | ~2 天 | ~$100 |
-| 1B (充分过训练) | 8× A100 80GB | 100B | ~1.5 天 | ~$600 |
-| 7B | 8× H100 80GB | 1T | ~9 天 | ~$6,000 |
-| 13B | 32× H100 80GB | 2T | ~9 天 | ~$25,000 |
-| 70B | 256× H100 80GB | 2T | ~6 天 | ~$130,000 |
+| 124M (GPT-2 small) | 1× RTX 4090 | 10B | ~31 小时 | ~$16 |
+| 1B | 1× A100 80GB | 20B | ~11 天 | ~$530 |
+| 1B (充分过训练) | 8× A100 80GB | 100B | ~7 天 | ~$2,700 |
+| 7B | 8× H100 80GB | 1T | ~154 天 | ~$103,000 |
+| 13B | 32× H100 80GB | 2T | ~143 天 | ~$383,000 |
+| 70B | 256× H100 80GB | 2T | ~96 天 | ~$2,060,000 |
 
 ### 微调成本估算（以 1-5 万条高质量指令数据为例）
 
@@ -230,10 +230,10 @@
 | LoRA SFT | 7B/8B | 1× A100 80GB | ~2-3 小时 | ~$5 |
 | 全参数 SFT | 7B/8B | 4× A100 80GB | ~3-5 小时 | ~$30 |
 | QLoRA SFT | 70B | 1× A100 80GB | ~8-10 小时 | ~$20 |
-| 全参数 SFT | 70B | 8× H100 80GB | ~6-10 小时 | ~$250 |
+| LoRA SFT | 70B | 8× H100 80GB | ~6-10 小时 | ~$250 |
 | LoRA DPO | 7B/8B | 2× A100 80GB | ~3-4 小时 | ~$15 |
 
-> 以上按 RTX 4090 ~$0.5/h、A100 ~$2.0/h、H100 ~$3.5/h 的按需租价估算，实际耗时取决于序列长度与是否开启 FlashAttention / Sequence Packing。
+> 以上按 RTX 4090 ~$0.5/h、A100 ~$2.0/h、H100 ~$3.5/h 的按需租价估算。预训练耗时按 7.6.1 节的 $6ND$ 公式计算，MFU 取 0.4，BF16 峰值算力取 H100 989、A100 312、RTX 4090 约 165 TFLOPS。70B 全参数 SFT 仅权重、梯度与 AdamW 状态就需约 1.1TB 显存，单台 8× H100 装不下，需要多机配合 ZeRO-3 / FSDP。实际耗时取决于序列长度与是否开启 FlashAttention / Sequence Packing。
 
 ---
 
